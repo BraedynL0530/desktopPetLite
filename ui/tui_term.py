@@ -83,7 +83,7 @@ class NativeTerminalTUI:
             self.draw_live_dashboard()
             print(" instructions: execute native commands, or query using context prompts.")
             print(" agentic sandbox loop:  sandbox <modification request>")
-            print(" sandbox controls: sandbox accept | sandbox clear confirm clear sandbox")
+            print(" sandbox controls: sandbox accept | sandbox clear <confirmation phrase>")
             print(" type 'exit' to cleanly return focus back to the desktop pet GUI panel.\n")
 
             try:

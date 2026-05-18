@@ -96,6 +96,11 @@ The report includes:
 Remote changes are applied locally only through explicit `sandbox accept`.  
 Running `sandbox <instruction>` alone does not directly modify local files.
 
+### SSH Host Key Requirement
+
+Pi bridge connections use strict SSH host-key validation.  
+Ensure the Raspberry Pi host key is trusted in local `known_hosts` before running sandbox commands.
+
 ## Safety Notes
 
 - Sandbox cleanup requires an explicit confirmation phrase and hard-checks the cleanup path.
