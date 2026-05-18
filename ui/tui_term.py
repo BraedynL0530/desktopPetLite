@@ -135,7 +135,7 @@ class NativeTerminalTUI:
                         bridge = PiDevBridge()
                         self.cat_bubble = bridge.pull_remote_mutations()
                     elif lower_instruction.startswith("clear"):
-                        confirm_phrase = task_instruction[5:].strip()
+                        confirm_phrase = task_instruction[len("clear"):].strip()
                         from core.pi_agent import PiDevBridge
                         bridge = PiDevBridge()
                         self.cat_bubble = bridge.clear_remote_sandbox(confirm_phrase)

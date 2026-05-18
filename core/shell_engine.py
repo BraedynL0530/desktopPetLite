@@ -18,7 +18,6 @@ class PersistentShell:
         self.q = queue.Queue()
         self.personality = PersonalityEngine()
         self.tui_callback = tui_callback
-        self.last_exit_code = 0
 
         # Passive Linting Debounce Trackers
         self.last_activity_time = time.time()
@@ -61,7 +60,6 @@ class PersistentShell:
         self.proc.stdin.flush()
 
         lines = []
-        marker_exit = None
         deadline = time.time() + 120
         while time.time() < deadline:
             try:
@@ -72,15 +70,10 @@ class PersistentShell:
                 continue
 
             if marker in line:
-                marker_exit = line.strip().replace(marker, "", 1)
                 break
             lines.append(line)
 
         output = "".join(lines)
-        try:
-            self.last_exit_code = int(marker_exit) if marker_exit else 0
-        except ValueError:
-            self.last_exit_code = 0
 
         with self.timer_lock:
             self.last_captured_output = output

@@ -272,7 +272,7 @@ class PiDevBridge:
             return "*yawns* configure your password environment."
 
         normalized_target = posixpath.normpath(self.remote_dir)
-        if normalized_target != "/home/pi/sandbox/workspace" or not normalized_target.startswith("/home/pi/sandbox/"):
+        if normalized_target != "/home/pi/sandbox/workspace":
             return "*hisses* cleanup blocked because sandbox path safety check failed."
 
         try:
