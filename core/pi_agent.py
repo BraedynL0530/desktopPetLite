@@ -2,6 +2,7 @@ import difflib
 import json
 import os
 import posixpath
+import stat
 import tarfile
 
 import paramiko
@@ -11,6 +12,7 @@ from core.llm_client import LintLLMClient
 
 class PiDevBridge:
     SNAPSHOT_EXTENSIONS = (".py", ".txt", ".json", ".md", ".env", ".bat", ".yml", ".yaml")
+    ARCHIVE_EXCLUDE_PATTERNS = (".git", "__pycache__", ".venv", ".idea")
 
     def __init__(self, pi_host="lintbox.local", pi_user="pi"):
         self.host = pi_host
@@ -40,6 +42,14 @@ class PiDevBridge:
                     except Exception:
                         continue
         return project_snapshot
+
+    @staticmethod
+    def _should_archive_entry(tarinfo, archive_name):
+        if archive_name in tarinfo.name:
+            return None
+        if any(pattern in tarinfo.name for pattern in PiDevBridge.ARCHIVE_EXCLUDE_PATTERNS):
+            return None
+        return tarinfo
 
     @staticmethod
     def _normalize_llm_payload(raw_json_reply: str):
@@ -93,6 +103,15 @@ class PiDevBridge:
             report_lines.append("_No file differences detected._")
         return "\n".join(report_lines).strip() + "\n"
 
+    def _clear_sftp_directory(self, sftp, remote_path):
+        for entry in sftp.listdir_attr(remote_path):
+            child_path = posixpath.join(remote_path, entry.filename)
+            if stat.S_ISDIR(entry.st_mode):
+                self._clear_sftp_directory(sftp, child_path)
+                sftp.rmdir(child_path)
+            else:
+                sftp.remove(child_path)
+
     def run_agentic_sandbox(self, task_instruction: str, run_cmd: str = "python3 launcher.py") -> str:
         if not self.password:
             return "*yawns* add your PI_PASSWORD to your .env file, dummy."
@@ -112,7 +131,7 @@ class PiDevBridge:
                 tar.add(
                     abs_local_path,
                     arcname=base_name,
-                    filter=lambda tarinfo: None if any(x in tarinfo.name for x in [".git", "__pycache__", ".venv", ".idea", archive_name]) else tarinfo,
+                    filter=lambda tarinfo: self._should_archive_entry(tarinfo, archive_name),
                 )
 
             ssh = self._create_ssh_client()
@@ -283,14 +302,15 @@ class PiDevBridge:
         try:
             ssh = self._create_ssh_client()
             ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
-            _, stdout, _ = ssh.exec_command(f'test -d "{normalized_target}" && echo ok || echo missing')
-            if stdout.read().decode("utf-8", errors="ignore").strip() != "ok":
+            sftp = ssh.open_sftp()
+            try:
+                sftp.stat(normalized_target)
+            except FileNotFoundError:
+                sftp.close()
                 ssh.close()
                 return "*hisses* sandbox cleanup failed because workspace path was missing."
-            cleanup_cmd = 'cd "{target}" && find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +'.format(
-                target=normalized_target
-            )
-            ssh.exec_command(cleanup_cmd)
+            self._clear_sftp_directory(sftp, normalized_target)
+            sftp.close()
             ssh.close()
             return "*purrs* sandbox workspace contents cleared safely."
         except Exception as e:

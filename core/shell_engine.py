@@ -9,6 +9,8 @@ from core.personality import PersonalityEngine
 
 
 class PersistentShell:
+    COMMAND_TIMEOUT_SECONDS = 120
+
     def __init__(self, tui_callback=None):
         cmd = ["powershell.exe", "-NoExit", "-Command",
                "$OutputEncoding = [System.Text.Encoding]::UTF8"] if sys.platform == "win32" else ["/bin/bash",
@@ -60,7 +62,7 @@ class PersistentShell:
         self.proc.stdin.flush()
 
         lines = []
-        deadline = time.time() + 120
+        deadline = time.time() + self.COMMAND_TIMEOUT_SECONDS
         while time.time() < deadline:
             try:
                 line = self.q.get(timeout=0.25)
