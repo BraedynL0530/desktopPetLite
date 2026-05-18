@@ -4,6 +4,7 @@ import subprocess
 import threading
 import queue
 import time
+import uuid
 from core.personality import PersonalityEngine
 
 
@@ -17,6 +18,7 @@ class PersistentShell:
         self.q = queue.Queue()
         self.personality = PersonalityEngine()
         self.tui_callback = tui_callback
+        self.last_exit_code = 0
 
         # Passive Linting Debounce Trackers
         self.last_activity_time = time.time()
@@ -37,15 +39,48 @@ class PersistentShell:
         with self.timer_lock:
             self.last_activity_time = time.time()  # Reset on command execution
 
-        self.proc.stdin.write(cmd_str + "\n")
+        while True:
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                break
+
+        marker = f"__LINT_DONE_{uuid.uuid4().hex}__"
+        if sys.platform == "win32":
+            wrapped_cmd = (
+                f"{cmd_str}\n"
+                f'Write-Output "{marker}$LASTEXITCODE"\n'
+            )
+        else:
+            wrapped_cmd = (
+                f"{cmd_str}\n"
+                f'printf "{marker}%s\\n" "$?"\n'
+            )
+
+        self.proc.stdin.write(wrapped_cmd)
         self.proc.stdin.flush()
-        time.sleep(0.25)
 
         lines = []
-        while not self.q.empty():
-            lines.append(self.q.get_nowait())
+        marker_exit = None
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            try:
+                line = self.q.get(timeout=0.25)
+            except queue.Empty:
+                if self.proc.poll() is not None:
+                    break
+                continue
+
+            if marker in line:
+                marker_exit = line.strip().replace(marker, "", 1)
+                break
+            lines.append(line)
 
         output = "".join(lines)
+        try:
+            self.last_exit_code = int(marker_exit) if marker_exit else 0
+        except ValueError:
+            self.last_exit_code = 0
 
         with self.timer_lock:
             self.last_captured_output = output
