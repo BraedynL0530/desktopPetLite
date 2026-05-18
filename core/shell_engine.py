@@ -4,10 +4,13 @@ import subprocess
 import threading
 import queue
 import time
+import uuid
 from core.personality import PersonalityEngine
 
 
 class PersistentShell:
+    COMMAND_TIMEOUT_SECONDS = 120
+
     def __init__(self, tui_callback=None):
         cmd = ["powershell.exe", "-NoExit", "-Command",
                "$OutputEncoding = [System.Text.Encoding]::UTF8"] if sys.platform == "win32" else ["/bin/bash",
@@ -37,13 +40,40 @@ class PersistentShell:
         with self.timer_lock:
             self.last_activity_time = time.time()  # Reset on command execution
 
-        self.proc.stdin.write(cmd_str + "\n")
+        while True:
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                break
+
+        marker = f"__SHELL_DONE_{uuid.uuid4().hex}__"
+        if sys.platform == "win32":
+            wrapped_cmd = (
+                f"{cmd_str}\n"
+                f'Write-Output "{marker}$LASTEXITCODE"\n'
+            )
+        else:
+            wrapped_cmd = (
+                f"{cmd_str}\n"
+                f'printf "{marker}%s\\n" "$?"\n'
+            )
+
+        self.proc.stdin.write(wrapped_cmd)
         self.proc.stdin.flush()
-        time.sleep(0.25)
 
         lines = []
-        while not self.q.empty():
-            lines.append(self.q.get_nowait())
+        deadline = time.time() + self.COMMAND_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            try:
+                line = self.q.get(timeout=0.25)
+            except queue.Empty:
+                if self.proc.poll() is not None:
+                    break
+                continue
+
+            if marker in line:
+                break
+            lines.append(line)
 
         output = "".join(lines)
 

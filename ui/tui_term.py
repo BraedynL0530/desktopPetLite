@@ -82,8 +82,8 @@ class NativeTerminalTUI:
         while True:
             self.draw_live_dashboard()
             print(" instructions: execute native commands, or query using context prompts.")
-            # FIXED: Updated instructions so you don't think you need to type "cat >>>" twice
-            print(" agentic sandbox loop:  sandbox <your explicit modification request instructions>")
+            print(" agentic sandbox loop:  sandbox <modification request>")
+            print(" sandbox controls: sandbox accept | sandbox clear <confirmation phrase>")
             print(" type 'exit' to cleanly return focus back to the desktop pet GUI panel.\n")
 
             try:
@@ -127,13 +127,19 @@ class NativeTerminalTUI:
 
                 elif lower_cmd.startswith("sandbox"):
                     task_instruction = clean_input[7:].strip().lstrip(",").strip()
+                    lower_instruction = task_instruction.lower()
 
-                    if task_instruction.lower() == "accept":
+                    if lower_instruction == "accept":
                         print("\n[!] executing remote synchronization path sequence pull...")
                         from core.pi_agent import PiDevBridge
                         bridge = PiDevBridge()
                         self.cat_bubble = bridge.pull_remote_mutations()
-                    if not task_instruction:
+                    elif lower_instruction.startswith("clear"):
+                        confirm_phrase = task_instruction[len("clear"):].strip()
+                        from core.pi_agent import PiDevBridge
+                        bridge = PiDevBridge()
+                        self.cat_bubble = bridge.clear_remote_sandbox(confirm_phrase)
+                    elif not task_instruction:
                         self.cat_bubble = "type what you want me to build and test inside the sandbox, dummy."
                     else:
                         print("\n[!] connecting via password credentials to remote pi sandbox...")
