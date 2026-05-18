@@ -247,9 +247,12 @@ class PiDevBridge:
                 return "*yawns* mutation index was empty."
 
             applied_count = 0
+            rejected_count = 0
             for rel_path, verified_content in mutations.items():
                 local_file_target = os.path.abspath(os.path.join(abs_local_path, rel_path))
                 if not local_file_target.startswith(abs_local_path + os.sep):
+                    print(f"[!] sandbox apply rejected unsafe path: {rel_path}")
+                    rejected_count += 1
                     continue
                 os.makedirs(os.path.dirname(local_file_target), exist_ok=True)
                 with open(local_file_target, "w", encoding="utf-8") as local_file:
@@ -259,6 +262,8 @@ class PiDevBridge:
             sftp.remove(remote_log_path)
             sftp.close()
             ssh.close()
+            if rejected_count:
+                return f"*purrs* synchronized {applied_count} files; rejected {rejected_count} unsafe path(s)."
             return f"*purrs unthrottled* safely synchronized {applied_count} updated verified files into active path."
 
         except Exception as e:
@@ -282,7 +287,10 @@ class PiDevBridge:
             if stdout.read().decode("utf-8", errors="ignore").strip() != "ok":
                 ssh.close()
                 return "*hisses* sandbox cleanup failed because workspace path was missing."
-            ssh.exec_command(f'cd "{normalized_target}" && find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +')
+            cleanup_cmd = 'cd "{target}" && find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +'.format(
+                target=normalized_target
+            )
+            ssh.exec_command(cleanup_cmd)
             ssh.close()
             return "*purrs* sandbox workspace contents cleared safely."
         except Exception as e:
