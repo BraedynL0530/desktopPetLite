@@ -10,6 +10,8 @@ from core.llm_client import LintLLMClient
 
 
 class PiDevBridge:
+    SNAPSHOT_EXTENSIONS = (".py", ".txt", ".json", ".md", ".env", ".bat", ".yml", ".yaml")
+
     def __init__(self, pi_host="lintbox.local", pi_user="pi"):
         self.host = pi_host
         self.user = pi_user
@@ -18,13 +20,19 @@ class PiDevBridge:
         self.max_loops = 3
         self.llm = LintLLMClient()
 
+    def _create_ssh_client(self):
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        return client
+
     def _build_project_snapshot(self):
         project_snapshot = {}
         for root, _, files in os.walk("."):
             if any(p in root for p in [".git", "__pycache__", ".venv", ".idea"]):
                 continue
             for file_name in files:
-                if file_name.endswith((".py", ".txt", ".json", ".md", ".env", ".bat", ".yml", ".yaml", "Dockerfile")):
+                if file_name.endswith(self.SNAPSHOT_EXTENSIONS) or file_name == "Dockerfile":
                     rel = os.path.relpath(os.path.join(root, file_name), ".")
                     try:
                         with open(rel, "r", encoding="utf-8") as file_stream:
@@ -107,8 +115,7 @@ class PiDevBridge:
                     filter=lambda tarinfo: None if any(x in tarinfo.name for x in [".git", "__pycache__", ".venv", ".idea", archive_name]) else tarinfo,
                 )
 
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh = self._create_ssh_client()
             ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
 
             sftp = ssh.open_sftp()
@@ -195,7 +202,8 @@ class PiDevBridge:
             for rel_path, new_content in remote_mutations_log.items():
                 original = baseline_snapshot.get(rel_path, "")
                 diff_text = self._build_unified_diff(rel_path, original, new_content)
-                per_file_diff[rel_path] = diff_text if diff_text else f"--- a/{rel_path}\n+++ b/{rel_path}\n"
+                if diff_text:
+                    per_file_diff[rel_path] = diff_text
 
             diff_markdown_content = self._render_diff_report(task_instruction, narrative_notes, command_history, per_file_diff)
             with open("diff.md", "w", encoding="utf-8") as diff_file:
@@ -219,8 +227,7 @@ class PiDevBridge:
         execution_path = f"{self.remote_dir}/{base_name}"
 
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh = self._create_ssh_client()
             ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
 
             sftp = ssh.open_sftp()
@@ -265,14 +272,17 @@ class PiDevBridge:
             return "*yawns* configure your password environment."
 
         normalized_target = posixpath.normpath(self.remote_dir)
-        if normalized_target != "/home/pi/sandbox/workspace":
+        if normalized_target != "/home/pi/sandbox/workspace" or not normalized_target.startswith("/home/pi/sandbox/"):
             return "*hisses* cleanup blocked because sandbox path safety check failed."
 
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh = self._create_ssh_client()
             ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
-            ssh.exec_command(f"cd {normalized_target} && find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +")
+            _, stdout, _ = ssh.exec_command(f'test -d "{normalized_target}" && echo ok || echo missing')
+            if stdout.read().decode("utf-8", errors="ignore").strip() != "ok":
+                ssh.close()
+                return "*hisses* sandbox cleanup failed because workspace path was missing."
+            ssh.exec_command(f'cd "{normalized_target}" && find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +')
             ssh.close()
             return "*purrs* sandbox workspace contents cleared safely."
         except Exception as e:

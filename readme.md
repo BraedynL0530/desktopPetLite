@@ -67,7 +67,7 @@ Any command that does not match an agent command prefix is executed in the persi
 - `modify <instruction>`: run local multi-file LLM editing flow.
 - `sandbox <instruction>`: run Raspberry Pi sandbox agent loop.
 - `sandbox accept`: apply pending `.sandbox_mutations.json` changes from Pi to the local project.
-- `sandbox clear confirm clear sandbox`: clear remote sandbox workspace contents with safety confirmation.
+- `sandbox clear <confirmation phrase>`: clear remote sandbox workspace contents only when the confirmation phrase is exactly `confirm clear sandbox`.
 - `obsidian daily`: run Obsidian daily summary flow.
 - `cat <prompt>`: conversational LLM response.
 

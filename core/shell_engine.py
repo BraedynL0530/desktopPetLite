@@ -45,7 +45,7 @@ class PersistentShell:
             except queue.Empty:
                 break
 
-        marker = f"__LINT_DONE_{uuid.uuid4().hex}__"
+        marker = f"__SHELL_DONE_{uuid.uuid4().hex}__"
         if sys.platform == "win32":
             wrapped_cmd = (
                 f"{cmd_str}\n"
