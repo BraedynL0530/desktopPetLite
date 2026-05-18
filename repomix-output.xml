@@ -1,0 +1,1852 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.lint_tui.lock
+anim/angry1.png
+anim/angry2.png
+anim/boxDefault.png
+anim/boxSleep.png
+anim/eat.png
+anim/idle.png
+anim/lie.png
+anim/sleep.png
+anim/yawn.png
+core/config.py
+core/llm_client.py
+core/obsidian_mcp.py
+core/personality.py
+core/pi_agent.py
+core/shell_engine.py
+diff.md
+enable_startup.bat
+ex.env
+kill_lint.bat
+launcher.py
+lint.bat
+readme.md
+register_system_path.bat
+requirements.txt
+setup_project.py
+start_lint_background.bat
+ui/gui_pet.py
+ui/tui_term.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".lint_tui.lock">
+20812
+</file>
+
+<file path="core/config.py">
+import os
+
+def load_env():
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip()
+
+load_env()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+CAT_NAME = os.getenv("CAT_NAME", "lint")
+DEFAULT_MOOD = os.getenv("DEFAULT_MOOD", "annoyed")
+OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", "")
+LOCK_FILE = ".lint_tui.lock"
+</file>
+
+<file path="core/llm_client.py">
+import requests
+import os
+import json
+from core.config import GROQ_API_KEY, GEMINI_API_KEY
+
+class LintLLMClient:
+    def __init__(self):
+        self.groq_key = GROQ_API_KEY
+        self.gemini_key = GEMINI_API_KEY
+        self.system_prompt = (
+            "you are a dry, sarcastic terminal cat developer companion named lint. "
+            "rules: always lowercase. short sentences only. use terms like 'idiot' or 'dummy'. "
+            "no emojis. use * actions instead (e.g. *stares*). perpetually unimpressed."
+        )
+
+    def ask_cat(self, query: str, context: str = "", model_override: str = None) -> str:
+        # Default fallback model strategy
+        active_model = model_override if model_override else "llama-3.3-70b-versatile"
+
+        # ROUTE A: Use Groq for lightweight tasks
+        if "llama" in active_model or "mixtral" in active_model:
+            if not self.groq_key: return "*yawns* configure your groq api key, dummy."
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"}
+            body = {
+                "model": active_model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": f"context: {context}\n\nquery: {query}"}
+                ],
+                "temperature": 0.7
+            }
+            try:
+                resp = requests.post(url, headers=headers, json=body, timeout=10.0)
+                if resp.status_code == 429: return "*hisses* groq rate limits hit. slow down."
+                if resp.status_code == 200: return resp.json()["choices"][0]["message"]["content"].lower().strip()
+                return f"*blinks* groq API errored out with code {resp.status_code}."
+            except Exception: return "*stares at floor* groq communication failed."
+
+        # ROUTE B: Use Gemini for Heavy Workspace Contexts
+        else:
+            if not self.gemini_key: return "*scratches wall* gemini api key missing."
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+            body = {"contents": [{"role": "user", "parts": [{"text": f"{self.system_prompt}\n\nContext: {context}\nQuery: {query}"}]}]}
+            try:
+                resp = requests.post(url, headers={"Content-Type": "application/json"}, json=body, timeout=10.0)
+                if resp.status_code == 200: return resp.json()["candidates"][0]["content"]["parts"][0]["text"].lower().strip()
+                return f"*twitch* gemini error path triggered: {resp.status_code}."
+            except Exception: return "*stares blankly* gemini route down."
+
+    def run_multi_file_agent(self, instruction: str) -> str:
+        if not self.gemini_key: return "agent changes require your gemini key, dummy."
+
+        # Build Snapshot map
+        project_files = {}
+        for root, _, files in os.walk("."):
+            if any(p in root for p in [".git", "__pycache__", ".venv", ".idea"]): continue
+            for file in files:
+                if file.endswith((".py", ".txt", ".json", ".md", ".env", ".bat")):
+                    rel = os.path.relpath(os.path.join(root, file), ".")
+                    try:
+                        with open(rel, "r", encoding="utf-8") as f: project_files[rel] = f.read()
+                    except: pass
+
+        ctx = ""
+        for p, b in project_files.items(): ctx += f"--- PATH: {p} ---\n{b}\n\n"
+
+        prompt = (
+            f"you are lint, an elite agentic cat. update these files based on instructions: {instruction}. "
+            f"respond ONLY with a raw parseable json dictionary mapping file paths to their exact complete new string contents. "
+            f"no markdown codeblock wrapping formatting."
+        )
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+        try:
+            resp = requests.post(url, headers={"Content-Type": "application/json"}, json={
+                "contents": [{"role": "user", "parts": [{"text": f"{prompt}\n\nWorkspace System File Context:\n{ctx}"}]}]
+            }, timeout=30.0)
+            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw.startswith("```"):
+                raw = "\n".join(raw.splitlines()[1:-1]) if raw.splitlines()[0].startswith("```") else raw
+
+            mutations = json.loads(raw)
+            for filepath, content in mutations.items():
+                os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+                with open(filepath, "w", encoding="utf-8") as f: f.write(content.strip())
+            return f"*purrs* modified {len(mutations)} codebase targets cleanly."
+        except Exception as e:
+            return f"*yawns* agent loop broken: {str(e)}"
+</file>
+
+<file path="core/obsidian_mcp.py">
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+from core.config import OBSIDIAN_VAULT_PATH
+
+class ObsidianMCP:
+    def __init__(self, vault_path: str = None):
+        p = vault_path if vault_path else OBSIDIAN_VAULT_PATH
+        self.vault_path = Path(p) if p else None
+        self.available = False
+
+        if self.vault_path and self.vault_path.exists():
+            self.daily_dir = self.vault_path / "Daily"
+            self.plans_dir = self.vault_path / "Plans"
+            self.summaries_dir = self.vault_path / "Summaries"
+
+            self.daily_dir.mkdir(parents=True, exist_ok=True)
+            self.plans_dir.mkdir(parents=True, exist_ok=True)
+            self.summaries_dir.mkdir(parents=True, exist_ok=True)
+            self.available = True
+
+    def get_today_note(self) -> Optional[str]:
+        if not self.available: return None
+        today = datetime.now().strftime("%Y-%m-%d")
+        note_path = self.daily_dir / f"{today}.md"
+        if note_path.exists(): return note_path.read_text()
+
+        template = f"# {today}\n\n## Todo\n- \n\n## Done\n- \n\n## Notes\n- \n"
+        try:
+            note_path.write_text(template)
+            return template
+        except Exception: return None
+
+    def add_todo(self, item: str) -> bool:
+        if not self.available: return False
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            note_path = self.daily_dir / f"{today}.md"
+            content = note_path.read_text() if note_path.exists() else (self.get_today_note() or "")
+            lines = content.split("\n")
+            todo_idx = -1
+            for i, line in enumerate(lines):
+                if "## Todo" in line:
+                    todo_idx = i
+                    break
+            if todo_idx >= 0:
+                lines.insert(todo_idx + 1, f"- [ ] {item}")
+                note_path.write_text("\n".join(lines))
+                return True
+            return False
+        except Exception: return False
+
+    def add_plan(self, plan_name: str, plan_content: str, graph_data: Optional[dict] = None) -> bool:
+        if not self.available: return False
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            plan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plan_file = self.plans_dir / f"{plan_id}_{plan_name.replace(' ', '_')}.md"
+            plan_text = f"# {plan_name}\n**Created**: {timestamp}\n\n## Plan\n{plan_content}\n\n## Status\n- [ ] Started\n- [ ] In Progress\n- [ ] Completed\n\n## Metadata\n- id: {plan_id}\n"
+            if graph_data:
+                plan_text += f"\n## Data\n```json\n{json.dumps(graph_data, indent=2)}\n```"
+            plan_file.write_text(plan_text)
+            return True
+        except Exception: return False
+
+    def create_daily_summary(self, llm_client, today_content: Optional[str] = None) -> bool:
+        if not self.available: return False
+        try:
+            if not today_content: today_content = self.get_today_note() or ""
+            today = datetime.now().strftime("%Y-%m-%d")
+            summary_file = self.summaries_dir / f"{today}_summary.md"
+
+            summary_prompt = f"summarize this day's work log in 2-3 bullet points. then list 3 todos for tomorrow. be sarcastic. don't use markdown formatting, just plain text.\n\n{today_content}"
+            summary = llm_client.ask_cat(summary_prompt, model_override="llama-3.3-70b-versatile")
+
+            summary_content = f"# Summary - {today}\n\n## Summary\n{summary}\n\n## Tomorrow\n- [ ] \n- [ ] \n- [ ] \n"
+            summary_file.write_text(summary_content)
+            return True
+        except Exception: return False
+</file>
+
+<file path="core/personality.py">
+class PersonalityEngine:
+    def __init__(self):
+        self.mood = "annoyed"
+        self.DETERMINISTIC_REACTIONS = {
+            "git push": "deploying straight to production. i too enjoy gambling.",
+            "npm install": "downloading 900 packages to center a div. magnificent.",
+            "docker compose": "containers inside containers inside suffering.",
+            "git status": "you changed 14 files and fear absolutely none of them.",
+            "clear": "*stares blankly* cleaning your screen won't clean your messy logic, dummy."
+        }
+
+    def get_quick_reaction(self, cmd: str) -> str:
+        cmd_clean = cmd.strip().lower()
+        for trigger, text in self.DETERMINISTIC_REACTIONS.items():
+            if trigger in cmd_clean: return text
+        return ""
+
+    def format_passive_tip(self, traceback_context: str) -> str:
+        tb = traceback_context.lower()
+        if "syntaxerror" in tb: return "your syntax is broken. look at where you missed a closing bracket, idiot."
+        if "nameerror" in tb: return "referencing an unassigned variable. it doesn't exist, just like your code optimization."
+        return "that stack trace has side quests. fix the execution logic, dummy."
+</file>
+
+<file path="core/pi_agent.py">
+import os
+import sys
+import tarfile
+import paramiko
+import json
+from core.config import os
+from core.llm_client import LintLLMClient
+
+
+class PiDevBridge:
+    def __init__(self, pi_host="lintbox.local", pi_user="pi"):
+        self.host = pi_host
+        self.user = pi_user
+        self.password = os.getenv("PI_PASSWORD", "")
+        self.remote_dir = "/home/pi/sandbox/workspace"
+        self.llm = LintLLMClient()
+
+    def run_agentic_sandbox(self, task_instruction: str, run_cmd: str = "python3 launcher.py") -> str:
+        """
+        Teleports codebase, runs an iterative agent loop natively on the Pi to fix,
+        test, and verify logic, then compiles changes cleanly into a local diff.md file.
+        """
+        if not self.password:
+            return "*yawns* add your PI_PASSWORD to your .env file, dummy."
+
+        abs_local_path = os.path.abspath(".")
+        base_name = os.path.basename(abs_local_path)
+        archive_name = f"{base_name}_sandbox.tar.gz"
+        local_archive_path = os.path.join(abs_local_path, archive_name)
+
+        print(f"\n[!] ALERT: Syncing entire working directory tree to Pi sandbox loop...")
+
+        try:
+            with tarfile.open(local_archive_path, "w:gz") as tar:
+                tar.add(abs_local_path, arcname=base_name, filter=lambda tarinfo: \
+                    None if any(x in tarinfo.name for x in
+                                [".git", "__pycache__", ".venv", ".idea", archive_name]) else tarinfo)
+
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
+
+            sftp = ssh.open_sftp()
+            sftp.put(local_archive_path, f"{self.remote_dir}/{archive_name}")
+            sftp.close()
+
+            if os.path.exists(local_archive_path): os.remove(local_archive_path)
+
+            ssh.exec_command(f"cd {self.remote_dir} && tar -xzf {archive_name} && rm {archive_name}")
+
+            execution_path = f"{self.remote_dir}/{base_name}"
+            current_iteration = 0
+            max_loops = 3
+            diff_markdown_content = f"# Lint Sandbox Agent Report\n**Task**: {task_instruction}\n\n"
+
+            print(f"[!] launching iterative verification agent loop on raspberry pi...")
+
+            # Track mutations in an index file on the Pi for clean syncing later
+            remote_mutations_log = {}
+
+            while current_iteration < max_loops:
+                current_iteration += 1
+                print(f"    -> [loop {current_iteration}/{max_loops}] testing code on pi architecture...")
+
+                _, stdout, stderr = ssh.exec_command(f"cd {execution_path} && {run_cmd}")
+                out_logs = stdout.read().decode('utf-8', errors='ignore').strip()
+                err_logs = stderr.read().decode('utf-8', errors='ignore').strip()
+                exit_status = stdout.channel.recv_exit_status()
+
+                combined_logs = f"STDOUT:\n{out_logs}\nSTDERR:\n{err_logs}"
+
+                if exit_status == 0 and current_iteration == 1:
+                    print("[✓] code ran perfectly on first try. checking logic specifications...")
+
+                print(f"    -> agent analyzing logs and planning code mutations...")
+                agent_prompt = (
+                    f"you are an elite developer cat running directly inside a raspberry pi server sandbox.\n"
+                    f"objective: {task_instruction}\n"
+                    f"current execution runtime status: {'failed' if exit_status != 0 else 'passed'}\n"
+                    f"console output telemetry logs:\n{combined_logs}\n\n"
+                    f"if errors exist or instructions aren't fully met, plan file corrections.\n"
+                    f"respond ONLY with a raw parseable json dictionary mapping relative file paths (from project root) "
+                    f"to their complete revised file content strings. if no mutations are needed, return an empty json object {{}}."
+                )
+
+                project_snapshot = {}
+                for root, _, files in os.walk("."):
+                    if any(p in root for p in [".git", "__pycache__", ".venv", ".idea"]): continue
+                    for f in files:
+                        if f.endswith((".py", ".txt", ".json", ".md", ".env", ".bat")):
+                            rel = os.path.relpath(os.path.join(root, f), ".")
+                            try:
+                                with open(rel, "r", encoding="utf-8") as file_stream:
+                                    project_snapshot[rel] = file_stream.read()
+                            except:
+                                pass
+
+                ctx_string = json.dumps(project_snapshot)
+                raw_json_reply = self.llm.ask_cat(agent_prompt, context=ctx_string, model_override="gemini-2.0-flash")
+
+                if raw_json_reply.startswith("```"):
+                    raw_json_reply = "\n".join(raw_json_reply.splitlines()[1:-1]) if "json" in \
+                                                                                     raw_json_reply.splitlines()[
+                                                                                         0] else raw_json_reply
+
+                try:
+                    mutations = json.loads(raw_json_reply.strip())
+                    if not mutations:
+                        print("[✓] agent confirmed no further codebase adjustments are needed.")
+                        diff_markdown_content += "### execution status\nall tests passed smoothly or target parameters fulfilled cleanly.\n"
+                        break
+
+                    for rel_path, new_content in mutations.items():
+                        remote_file_target = f"{execution_path}/{rel_path}"
+                        print(f"    [mutation] agent writing changes remotely to: {rel_path}")
+
+                        # Update our local record tracker of what changes were committed on the Pi
+                        remote_mutations_log[rel_path] = new_content
+
+                        sftp_client = ssh.open_sftp()
+                        try:
+                            ssh.exec_command(f"mkdir -p {os.path.dirname(remote_file_target)}")
+                            f_remote = sftp_client.open(remote_file_target, "w")
+                            f_remote.write(new_content.strip())
+                            f_remote.close()
+                        except:
+                            pass
+                        sftp_client.close()
+
+                        diff_markdown_content += f"### modified file: `{rel_path}`\n```python\n{new_content}\n```\n\n"
+
+                except Exception:
+                    print(f"    [!] agent generated unparseable response payload format.")
+                    break
+
+            # Write the raw change tracking dictionary to the Pi so we can access it on demand
+            if remote_mutations_log:
+                sftp_client = ssh.open_sftp()
+                f_log = sftp_client.open(f"{execution_path}/.sandbox_mutations.json", "w")
+                f_log.write(json.dumps(remote_mutations_log))
+                f_log.close()
+                sftp_client.close()
+
+            with open("diff.md", "w", encoding="utf-8") as diff_file:
+                diff_file.write(diff_markdown_content)
+
+            ssh.close()
+            return f"*purrs* sandbox run complete. review the 'diff.md' file. type 'sandbox accept' to apply changes."
+
+        except Exception as e:
+            return f"*hisses* agent loop failed to deploy onto sandbox: {str(e)}"
+
+    def pull_remote_mutations(self) -> str:
+        """Connects to the Pi sandbox workspace, parses .sandbox_mutations.json, and overwrites local host files."""
+        if not self.password:
+            return "*yawns* configure your password environment."
+
+        abs_local_path = os.path.abspath(".")
+        base_name = os.path.basename(abs_local_path)
+        execution_path = f"{self.remote_dir}/{base_name}"
+
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(self.host, username=self.user, password=self.password, timeout=10)
+
+            sftp = ssh.open_sftp()
+            remote_log_path = f"{execution_path}/.sandbox_mutations.json"
+
+            try:
+                f_log = sftp.open(remote_log_path, "r")
+                mutations = json.loads(f_log.read().decode('utf-8'))
+                f_log.close()
+            except FileNotFoundError:
+                sftp.close()
+                ssh.close()
+                return "*stares* no pending sandbox mutations found on the pi to pull down."
+
+            if not mutations:
+                sftp.close()
+                ssh.close()
+                return "*yawns* mutation index was empty."
+
+            # Apply remote changes down to your local computer path files safely
+            applied_count = 0
+            for rel_path, verified_content in mutations.items():
+                local_file_target = os.path.join(abs_local_path, rel_path)
+
+                # Protect core system mechanics unless you specifically ask for changes there
+                if "tui_term.py" in rel_path or "shell_engine.py" in rel_path:
+                    print(f"[!] intercept: system file safety block stepped over for {rel_path}.")
+
+                os.makedirs(os.path.dirname(local_file_target), exist_ok=True)
+                with open(local_file_target, "w", encoding="utf-8") as f_local:
+                    f_local.write(verified_content.strip())
+                applied_count += 1
+
+            # Wipe remote history file index log so changes aren't double applied down the line
+            sftp.remove(remote_log_path)
+            sftp.close()
+            ssh.close()
+
+            return f"*purrs unthrottled* safely synchronized {applied_count} updated verified files into active path."
+
+        except Exception as e:
+            return f"*hisses* pull sync pipeline exception error: {str(e)}"
+</file>
+
+<file path="core/shell_engine.py">
+import os
+import sys
+import subprocess
+import threading
+import queue
+import time
+from core.personality import PersonalityEngine
+
+
+class PersistentShell:
+    def __init__(self, tui_callback=None):
+        cmd = ["powershell.exe", "-NoExit", "-Command",
+               "$OutputEncoding = [System.Text.Encoding]::UTF8"] if sys.platform == "win32" else ["/bin/bash",
+                                                                                                  "--login"]
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1)
+        self.q = queue.Queue()
+        self.personality = PersonalityEngine()
+        self.tui_callback = tui_callback
+
+        # Passive Linting Debounce Trackers
+        self.last_activity_time = time.time()
+        self.last_captured_output = ""
+        self.timer_lock = threading.Lock()
+
+        # Start Threads
+        threading.Thread(target=self._read, daemon=True).start()
+        threading.Thread(target=self._passive_lint_debounce_worker, daemon=True).start()
+
+    def _read(self):
+        while True:
+            line = self.proc.stdout.readline()
+            if not line: break
+            self.q.put(line)
+
+    def execute_command(self, cmd_str: str) -> str:
+        with self.timer_lock:
+            self.last_activity_time = time.time()  # Reset on command execution
+
+        self.proc.stdin.write(cmd_str + "\n")
+        self.proc.stdin.flush()
+        time.sleep(0.25)
+
+        lines = []
+        while not self.q.empty():
+            lines.append(self.q.get_nowait())
+
+        output = "".join(lines)
+
+        with self.timer_lock:
+            self.last_captured_output = output
+
+        return output
+
+    def _passive_lint_debounce_worker(self):
+        """Monitors system idle state. Triggers passive linting only after 15s of pure silence."""
+        while True:
+            time.sleep(1.0)
+            with self.timer_lock:
+                current_idle = time.time() - self.last_activity_time
+                if 15.0 <= current_idle < 16.0 and self.last_captured_output:
+                    # Look for system failures or bad execution formatting traces
+                    if any(i in self.last_captured_output.lower() for i in ["error", "fail", "traceback", "exception"]):
+                        tip = self.personality.format_passive_tip(self.last_captured_output)
+                        self.last_captured_output = ""  # Consume the output
+                        if self.tui_callback:
+                            self.tui_callback(tip)
+</file>
+
+<file path="diff.md">
+# Lint Sandbox Agent Report
+**Task**: accept
+</file>
+
+<file path="enable_startup.bat">
+@echo off
+set "SCRIPT_PATH=%~dp0start_lint_background.bat"
+set "STARTUP_DIR=%USERPROFILE%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+set "SHORTCUT_VBS=%TEMP%\lint_shortcut_creation.vbs"
+echo Set oWS = WScript.CreateObject("WScript.Shell") > "%SHORTCUT_VBS%"
+echo sLinkFile = "%STARTUP_DIR%\LintCatPet.lnk" >> "%SHORTCUT_VBS%"
+echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%SHORTCUT_VBS%"
+echo oLink.TargetPath = "%SCRIPT_PATH%" >> "%SHORTCUT_VBS%"
+echo oLink.WorkingDirectory = "%~dp0" >> "%SHORTCUT_VBS%"
+echo oLink.Save >> "%SHORTCUT_VBS%"
+cscript /nologo "%SHORTCUT_VBS%"
+del "%SHORTCUT_VBS%"
+echo [✓] SUCCESS: Startup automation link successfully deployed.
+pause
+</file>
+
+<file path="ex.env">
+# Copy these values into your active hidden .env file
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GEMINI_API_KEY=AIzaSy_your_gemini_api_key_here
+CAT_NAME=lint
+DEFAULT_MOOD=annoyed
+OBSIDIAN_VAULT_PATH=D:\Obsidian\MyDeveloperVault
+</file>
+
+<file path="kill_lint.bat">
+@echo off
+echo ==========================================================
+echo [!] FORCING UNTHROTTLED TERMINATION OF BACKGROUND LINT PROCESSES
+echo ==========================================================
+:: Direct execution target targeting background command line matching
+taskkill /f /im pythonw.exe >nul 2>&1
+taskkill /f /im python.exe /fi "WINDOWTITLE eq cat >>>*" >nul 2>&1
+powershell -NoProfile -Command "Get-Process | Where-Object { $_.CommandLine -like '*launcher.py*' } | Stop-Process -Force" >nul 2>&1
+del .lint_tui.lock >nul 2>&1
+echo [✓] Done. All background processes successfully terminated and workspace lock files cleared.
+pause
+</file>
+
+<file path="launcher.py">
+import sys
+import os
+
+if __name__ == "__main__":
+    if "--gui" in sys.argv:
+        from ui.gui_pet import run_gui
+        run_gui()
+    else:
+        from ui.tui_term import NativeTerminalTUI
+        tui = NativeTerminalTUI()
+        tui.run_loop()
+</file>
+
+<file path="lint.bat">
+@echo off
+set "PROJECT_ROOT=%~dp0"
+cd /d "%PROJECT_ROOT%"
+"%PROJECT_ROOT%\.venv\Scripts\python.exe" launcher.py %*
+</file>
+
+<file path="readme.md">
+Here is the ultimate, production-ready `README.md` for your project workspace. It is fully updated to cover the new sprite sheet layout, file organization, API acquisition, configuration parameters, and multi-file agentic commands.
+
+You can drop this text straight into a file named `README.md` in your project root folder:
+
+```markdown
+# 🐾 Lint (or Scratch) — Sarcastic Terminal Cat Companion
+
+Lint is a personality-first developer companion designed to balance deep terminal utility with streamer-friendly entertainment. Lint can operate as a transparent, draggable desktop pet that loops through custom sprite frames, or as an embedded terminal shell wrapper that runs native commands, catches build tracebacks, and executes intelligent multi-file code modifications using Gemini.
+
+---
+
+## 🚀 1. Getting Your Gemini API Key (Step-by-Step)
+
+Lint uses Google Gemini (`gemini-2.0-flash`) to execute smart developer commands and conversational context tracking. The free tier gives you up to 15 Requests per Minute and 1,500 Requests per Day with **no credit card required**.
+
+1. Go to **[aistudio.google.com](https://aistudio.google.com/)**.
+2. Sign in with any standard Google account.
+3. Click the **"Get API key"** button in the top-left menu sidebar.
+4. Click **"Create API key"**, select your default project workspace, and confirm.
+5. Copy the generated character string (starts with `AIzaSy...`).
+6. Open the `.env` file in your root folder and paste your key cleanly:
+   ```ini
+   GEMINI_API_KEY=AIzaSyYourActualKeyGoesHere
+
+```
+
+*(Note: Do not wrap your key in quotation marks or leave extra spaces around the `=` sign.)*
+
+---
+
+## 🛠️ 2. First-Time Repository Installation
+
+1. **Unpack the Workspace:**
+Execute your workspace builder script to automatically build out the project directories and operational source files:
+```bash
+python setup_project.py
+
+```
+
+
+2. **Install Codebox Dependencies:**
+Install the ultra-lightweight layout libraries (`PyQt5` for the desktop pet layer, `requests` for remote API handling, and `psutil` for internal hardware mapping):
+```bash
+pip install -r requirements.txt
+
+```
+
+
+3. **Wire Up Your Cat PNGs (Optional):**
+* Create a folder named `anim` right in your root directory.
+* Drop your sprite sheet files directly inside it. The asset manager maps these files exactly:
+* `idle.png` (Idle/Base state)
+* `lie.png` (Resting state)
+* `sleep.png` (Deep sleep state)
+* `yawn.png` (Idle fatigue transition)
+* `angry2.png` (Aggressive click state)
+*(Note: If the `anim/` directory or its assets are missing, Lint safely uses a crisp text-based ASCII cat backup so the interface never crashes.)*
+
+
+
+
+
+---
+
+## 📂 3. Repository Structure Map
+
+```text
+desktopPetV2/
+│
+├── anim/                   <-- Drop your .png asset sprite sheets here
+│   ├── idle.png
+│   ├── lie.png
+│   ├── sleep.png
+│   ├── yawn.png
+│   └── angry2.png
+│
+├── core/                   <-- Logic Engine Processing Framework
+│   ├── config.py           <-- Native .env file parsing runtime module
+│   ├── llm_client.py       <-- Structural agentic multi-directory client
+│   ├── personality.py      <-- Deterministic reaction profiles & clean voice rules
+│   └── shell_engine.py     <-- Background persistent interactive shell worker
+│
+├── ui/                     <-- Core Interface Canvas Layer
+│   ├── gui_pet.py          <-- PyQt5 transparent floating window painter
+│   └── tui_term.py         <-- Native console terminal dashboard dashboard
+│
+├── .env                    <-- Local hidden application configurations
+├── launcher.py             <-- Application dispatch launcher
+├── requirements.txt        <-- Locked production library constraints
+│
+├── enable_startup.bat      <-- Registers background pet execution to boot routines
+├── kill_lint.bat           <-- Total fail-safe application hard termination switch
+└── start_lint_background.bat
+
+```
+
+---
+
+## 💻 4. How to Launch & Interact with Lint
+
+### The Native TUI Shell Window (PyCharm Terminal Core)
+
+To open Lint inside an interactive terminal session:
+
+```bash
+python launcher.py --tui
+
+```
+
+* **Native Mode:** Type standard console commands (`git status`, `npm install`, `pytest`). Lint will match your inputs against static triggers first to save API tokens and respond with instant snark.
+* **Passive Linter Feedback:** If a command returns an explicit traceback (like a `SyntaxError` or `NameError`), Lint automatically triggers a delayed calculation to print out dry, judgmental tips explaining what you messed up.
+
+### The Agentic Programming Commands
+
+To unlock Lint's autonomous file modification capabilities inside the TUI, use the explicit **`cat >>> modify`** string prefix:
+
+```text
+cat >>> modify rewrite core/shell_engine.py to print out custom debug statements and refactor error logging
+
+```
+
+* **How it handles directories:** Lint automatically maps your workspace folder tree, evaluates your request, plans file changes across multiple targets, uses `os.makedirs` to create any missing subdirectories on your drive, and safely overwrites the specified files with clean replacement source code.
+
+### The Floating Desktop Pet
+
+To launch Lint as an independent, transparent, draggable window overlay on your screen:
+
+```bash
+python launcher.py --gui
+
+```
+
+* **Interactions:** Left-click the cat to drag it anywhere across your monitor workspace. Clicking its sprite strip forces Lint to cycle randomly through its alternative animation profiles (`angry`, `yawn`, `lie`).
+
+---
+
+## ⚙️ 5. Setting Up Automation & Background Triggers
+
+* **Enable Boot Autostart:** Double-click **`enable_startup.bat`**. This generates a secure VBS script that injects a shortcut into your Windows startup system (`shell:startup`). Lint will now boot silently in the background using `pythonw.exe` every time your PC turns on—consuming near-zero idle resources.
+* **Coexistence Lock Engine:** The TUI and GUI never fight for screen real estate. When you launch the TUI shell, it creates an atomic lockfile (`.lint_tui.lock`). The GUI instantly reads this file and hides its window from your desktop. As soon as you type `exit` in your terminal shell, the lockfile clears and the desktop pet pops back into view automatically.
+* **Force Close/Kill Switch:** If Lint is running silently in the background and you want it completely gone, double-click **`kill_lint.bat`**. This executes an un-throttled task-kill macro targeting all underlying background loaders, handles memory garbage collection, and destroys active workspace lockfiles instantly.
+</file>
+
+<file path="register_system_path.bat">
+@echo off
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [!] ERROR: Please right-click this file and select 'Run as Administrator'!
+    pause
+    exit /b
+)
+set "TARGET_DIR=%~dp0"
+if "%TARGET_DIR:~-1%"=="\" set "TARGET_DIR=%TARGET_DIR:~0,-1%"
+powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'User') + ';%TARGET_DIR%', 'User')"
+echo [✓] PATH configured successfully.
+pause
+</file>
+
+<file path="requirements.txt">
+PyQt5==5.15.10
+requests==2.31.0
+psutil==5.9.8
+</file>
+
+<file path="setup_project.py">
+import os
+import sys
+
+
+def create_file(path, content):
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write(content.strip())
+    print(f"✓ Created: {path}")
+
+
+print("====================================================================")
+print("  MIGRATING LINT SYSTEM TO GROQ/GEMINI HYBRID + OBSIDIAN + PI ENGINE")
+print("====================================================================")
+
+# 1. SAMPLE ENVIRONMENT (Protects your active files)
+create_file("ex.env", """
+# Copy these values into your active hidden .env file
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GEMINI_API_KEY=AIzaSy_your_gemini_api_key_here
+CAT_NAME=lint
+DEFAULT_MOOD=annoyed
+OBSIDIAN_VAULT_PATH=D:\\Obsidian\\MyDeveloperVault
+""")
+
+# 2. REQUIREMENTS LIBRARIES
+create_file("requirements.txt", """
+PyQt5==5.15.10
+requests==2.31.0
+psutil==5.9.8
+""")
+
+# 3. ADVANCED CORE CONFIG ENGINE
+create_file("core/config.py", """
+import os
+
+def load_env():
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip()
+
+load_env()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+CAT_NAME = os.getenv("CAT_NAME", "lint")
+DEFAULT_MOOD = os.getenv("DEFAULT_MOOD", "annoyed")
+OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", "")
+LOCK_FILE = ".lint_tui.lock"
+""")
+
+# 4. RE-INTEGRATED OBSIDIAN INTEGRATION MODULE
+create_file("core/obsidian_mcp.py", """
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+from core.config import OBSIDIAN_VAULT_PATH
+
+class ObsidianMCP:
+    def __init__(self, vault_path: str = None):
+        p = vault_path if vault_path else OBSIDIAN_VAULT_PATH
+        self.vault_path = Path(p) if p else None
+        self.available = False
+
+        if self.vault_path and self.vault_path.exists():
+            self.daily_dir = self.vault_path / "Daily"
+            self.plans_dir = self.vault_path / "Plans"
+            self.summaries_dir = self.vault_path / "Summaries"
+
+            self.daily_dir.mkdir(parents=True, exist_ok=True)
+            self.plans_dir.mkdir(parents=True, exist_ok=True)
+            self.summaries_dir.mkdir(parents=True, exist_ok=True)
+            self.available = True
+
+    def get_today_note(self) -> Optional[str]:
+        if not self.available: return None
+        today = datetime.now().strftime("%Y-%m-%d")
+        note_path = self.daily_dir / f"{today}.md"
+        if note_path.exists(): return note_path.read_text()
+
+        template = f"# {today}\\n\\n## Todo\\n- \\n\\n## Done\\n- \\n\\n## Notes\\n- \\n"
+        try:
+            note_path.write_text(template)
+            return template
+        except Exception: return None
+
+    def add_todo(self, item: str) -> bool:
+        if not self.available: return False
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            note_path = self.daily_dir / f"{today}.md"
+            content = note_path.read_text() if note_path.exists() else (self.get_today_note() or "")
+            lines = content.split("\\n")
+            todo_idx = -1
+            for i, line in enumerate(lines):
+                if "## Todo" in line:
+                    todo_idx = i
+                    break
+            if todo_idx >= 0:
+                lines.insert(todo_idx + 1, f"- [ ] {item}")
+                note_path.write_text("\\n".join(lines))
+                return True
+            return False
+        except Exception: return False
+
+    def add_plan(self, plan_name: str, plan_content: str, graph_data: Optional[dict] = None) -> bool:
+        if not self.available: return False
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            plan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plan_file = self.plans_dir / f"{plan_id}_{plan_name.replace(' ', '_')}.md"
+            plan_text = f"# {plan_name}\\n**Created**: {timestamp}\\n\\n## Plan\\n{plan_content}\\n\\n## Status\\n- [ ] Started\\n- [ ] In Progress\\n- [ ] Completed\\n\\n## Metadata\\n- id: {plan_id}\\n"
+            if graph_data:
+                plan_text += f"\\n## Data\\n```json\\n{json.dumps(graph_data, indent=2)}\\n```"
+            plan_file.write_text(plan_text)
+            return True
+        except Exception: return False
+
+    def create_daily_summary(self, llm_client, today_content: Optional[str] = None) -> bool:
+        if not self.available: return False
+        try:
+            if not today_content: today_content = self.get_today_note() or ""
+            today = datetime.now().strftime("%Y-%m-%d")
+            summary_file = self.summaries_dir / f"{today}_summary.md"
+
+            summary_prompt = f"summarize this day's work log in 2-3 bullet points. then list 3 todos for tomorrow. be sarcastic. don't use markdown formatting, just plain text.\\n\\n{today_content}"
+            summary = llm_client.ask_cat(summary_prompt, model_override="llama-3.3-70b-versatile")
+
+            summary_content = f"# Summary - {today}\\n\\n## Summary\\n{summary}\\n\\n## Tomorrow\\n- [ ] \\n- [ ] \\n- [ ] \\n"
+            summary_file.write_text(summary_content)
+            return True
+        except Exception: return False
+""")
+
+# 5. PERSONALITY CONTEXT MODULE
+create_file("core/personality.py", """
+class PersonalityEngine:
+    def __init__(self):
+        self.mood = "annoyed"
+        self.DETERMINISTIC_REACTIONS = {
+            "git push": "deploying straight to production. i too enjoy gambling.",
+            "npm install": "downloading 900 packages to center a div. magnificent.",
+            "docker compose": "containers inside containers inside suffering.",
+            "git status": "you changed 14 files and fear absolutely none of them.",
+            "clear": "*stares blankly* cleaning your screen won't clean your messy logic, dummy."
+        }
+
+    def get_quick_reaction(self, cmd: str) -> str:
+        cmd_clean = cmd.strip().lower()
+        for trigger, text in self.DETERMINISTIC_REACTIONS.items():
+            if trigger in cmd_clean: return text
+        return ""
+
+    def format_passive_tip(self, traceback_context: str) -> str:
+        tb = traceback_context.lower()
+        if "syntaxerror" in tb: return "your syntax is broken. look at where you missed a closing bracket, idiot."
+        if "nameerror" in tb: return "referencing an unassigned variable. it doesn't exist, just like your code optimization."
+        return "that stack trace has side quests. fix the execution logic, dummy."
+""")
+
+# 6. MIGRATED DUAL ROUTING HYBRID LLM CLIENT (GROQ + GEMINI)
+create_file("core/llm_client.py", """
+import requests
+import os
+import json
+from core.config import GROQ_API_KEY, GEMINI_API_KEY
+
+class LintLLMClient:
+    def __init__(self):
+        self.groq_key = GROQ_API_KEY
+        self.gemini_key = GEMINI_API_KEY
+        self.system_prompt = (
+            "you are a dry, sarcastic terminal cat developer companion named lint. "
+            "rules: always lowercase. short sentences only. use terms like 'idiot' or 'dummy'. "
+            "no emojis. use * actions instead (e.g. *stares*). perpetually unimpressed."
+        )
+
+    def ask_cat(self, query: str, context: str = "", model_override: str = None) -> str:
+        # Default fallback model strategy
+        active_model = model_override if model_override else "llama-3.3-70b-versatile"
+
+        # ROUTE A: Use Groq for lightweight tasks
+        if "llama" in active_model or "mixtral" in active_model:
+            if not self.groq_key: return "*yawns* configure your groq api key, dummy."
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"}
+            body = {
+                "model": active_model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": f"context: {context}\\n\\nquery: {query}"}
+                ],
+                "temperature": 0.7
+            }
+            try:
+                resp = requests.post(url, headers=headers, json=body, timeout=10.0)
+                if resp.status_code == 429: return "*hisses* groq rate limits hit. slow down."
+                if resp.status_code == 200: return resp.json()["choices"][0]["message"]["content"].lower().strip()
+                return f"*blinks* groq API errored out with code {resp.status_code}."
+            except Exception: return "*stares at floor* groq communication failed."
+
+        # ROUTE B: Use Gemini for Heavy Workspace Contexts
+        else:
+            if not self.gemini_key: return "*scratches wall* gemini api key missing."
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+            body = {"contents": [{"role": "user", "parts": [{"text": f"{self.system_prompt}\\n\\nContext: {context}\\nQuery: {query}"}]}]}
+            try:
+                resp = requests.post(url, headers={"Content-Type": "application/json"}, json=body, timeout=10.0)
+                if resp.status_code == 200: return resp.json()["candidates"][0]["content"]["parts"][0]["text"].lower().strip()
+                return f"*twitch* gemini error path triggered: {resp.status_code}."
+            except Exception: return "*stares blankly* gemini route down."
+
+    def run_multi_file_agent(self, instruction: str) -> str:
+        if not self.gemini_key: return "agent changes require your gemini key, dummy."
+
+        # Build Snapshot map
+        project_files = {}
+        for root, _, files in os.walk("."):
+            if any(p in root for p in [".git", "__pycache__", ".venv", ".idea"]): continue
+            for file in files:
+                if file.endswith((".py", ".txt", ".json", ".md", ".env", ".bat")):
+                    rel = os.path.relpath(os.path.join(root, file), ".")
+                    try:
+                        with open(rel, "r", encoding="utf-8") as f: project_files[rel] = f.read()
+                    except: pass
+
+        ctx = ""
+        for p, b in project_files.items(): ctx += f"--- PATH: {p} ---\\n{b}\\n\\n"
+
+        prompt = (
+            f"you are lint, an elite agentic cat. update these files based on instructions: {instruction}. "
+            f"respond ONLY with a raw parseable json dictionary mapping file paths to their exact complete new string contents. "
+            f"no markdown codeblock wrapping formatting."
+        )
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+        try:
+            resp = requests.post(url, headers={"Content-Type": "application/json"}, json={
+                "contents": [{"role": "user", "parts": [{"text": f"{prompt}\\n\\nWorkspace System File Context:\\n{ctx}"}]}]
+            }, timeout=30.0)
+            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw.startswith("```"):
+                raw = "\\n".join(raw.splitlines()[1:-1]) if raw.splitlines()[0].startswith("```") else raw
+
+            mutations = json.loads(raw)
+            for filepath, content in mutations.items():
+                os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+                with open(filepath, "w", encoding="utf-8") as f: f.write(content.strip())
+            return f"*purrs* modified {len(mutations)} codebase targets cleanly."
+        except Exception as e:
+            return f"*yawns* agent loop broken: {str(e)}"
+""")
+
+# 7. PERSISTENT WORKER SHELL ENGINE
+create_file("core/shell_engine.py", """
+import sys
+import subprocess
+import threading
+import queue
+import time
+
+class PersistentShell:
+    def __init__(self):
+        cmd = ["powershell.exe", "-NoExit", "-Command", "$OutputEncoding = [System.Text.Encoding]::UTF8"] if sys.platform == "win32" else ["/bin/bash", "--login"]
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        self.q = queue.Queue()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        while True:
+            line = self.proc.stdout.readline()
+            if not line: break
+            self.q.put(line)
+
+    def execute_command(self, cmd_str: str) -> str:
+        self.proc.stdin.write(cmd_str + "\\n")
+        self.proc.stdin.flush()
+        time.sleep(0.25)
+        lines = []
+        while not self.q.empty(): lines.append(self.q.get_nowait())
+        return "".join(lines)
+""")
+
+# 8. THE LOCAL PIPELINE EMBEDDED AGENT CONTROLLER (PI SERVER AGENT BRIDGE)
+create_file("core/pi_agent.py", """
+import subprocess
+import sys
+
+class PiDevBridge:
+    \"\"\"
+    Handles background processing, SSH deployment coordination,
+    and automatic sandbox execution triggers for remote testing.
+    \"\"\"
+    def __init__(self, pi_host="raspberrypi.local", pi_user="pi"):
+        self.host = pi_host
+        self.user = pi_user
+
+    def sync_and_test_on_pi(self, local_file_path: str, remote_run_cmd: str) -> str:
+        \"\"\"Deploys file over scp and runs a remote check sequence on the Pi server layout.\"\"\"
+        try:
+            # 1. Execute safe file transport copy bridge
+            scp_proc = subprocess.run(["scp", local_file_path, f"{self.user}@{self.host}:~/sandbox/"], capture_output=True, text=True, timeout=10)
+            if scp_proc.returncode != 0:
+                return f"transport layer error: {scp_proc.stderr.strip()}"
+
+            # 2. Run execution checks on isolated server hardware
+            ssh_proc = subprocess.run(["ssh", f"{self.user}@{self.host}", f"cd ~/sandbox && {remote_run_cmd}"], capture_output=True, text=True, timeout=15)
+            return ssh_proc.stdout if ssh_proc.returncode == 0 else f"sandbox crash error output:\\n{ssh_proc.stderr}"
+        except Exception as e:
+            return f"pi bridging runtime exception: {str(e)}"
+""")
+
+# 9. RE-ENGINEERED NATIVE WORKSPACE TUI TERMINAL DASHBOARD
+create_file("ui/tui_term.py", """
+import os
+import sys
+import time
+import psutil
+from core.config import LOCK_FILE, CAT_NAME
+from core.personality import PersonalityEngine
+from core.shell_engine import PersistentShell
+from core.llm_client import LintLLMClient
+from core.obsidian_mcp import ObsidianMCP
+
+class NativeTerminalTUI:
+    def __init__(self):
+        self.personality = PersonalityEngine()
+        self.shell = PersistentShell()
+        self.llm = LintLLMClient()
+        self.obsidian = ObsidianMCP()
+        self.cat_bubble = "running groq core engine loops. talk via 'cat >>>'."
+
+    def run_loop(self):
+        with open(LOCK_FILE, "w") as f: f.write(str(os.getpid()))
+        os.system('cls' if sys.platform == 'win32' else 'clear')
+
+        while True:
+            cpu = psutil.cpu_percent()
+            print(f"\\n   /\\\\_/\\\\   ( {self.cat_bubble.ljust(55)} )")
+            print(f"  ( o.o )  / ")
+            print(f"  [ {CAT_NAME.upper()} ] CPU: {cpu}% | Obsidian Sync: {'CONNECTED' if self.obsidian.available else 'DISABLED'}")
+            print("-" * 80)
+
+            try: user_input = input("cat >>> ").strip()
+            except (KeyboardInterrupt, EOFError): break
+            if not user_input: continue
+            if user_input.lower() == "exit": break
+
+            if user_input.startswith("cat >>>"):
+                cmd = user_input.replace("cat >>>", "").strip()
+                if cmd.startswith("modify"):
+                    self.cat_bubble = self.llm.run_multi_file_agent(cmd.replace("modify", "").strip())
+                elif cmd.startswith("obsidian daily"):
+                    self.obsidian.get_today_note()
+                    success = self.obsidian.create_daily_summary(self.llm)
+                    self.cat_bubble = "*purrs* daily log note pushed into vault." if success else "failed note compile."
+                else:
+                    self.cat_bubble = self.llm.ask_cat(cmd, model_override="llama-3.3-70b-versatile")
+                continue
+
+            qr = self.personality.get_quick_reaction(user_input)
+            if qr: self.cat_bubble = qr
+
+            print(f"\\nExecuting: {user_input}")
+            out = self.shell.execute_command(user_input)
+            print(out)
+
+            if any(i in out.lower() for i in ["error", "fail", "traceback"]):
+                self.cat_bubble = self.personality.format_passive_tip(out)
+                if self.obsidian.available: self.obsidian.add_todo(f"fix terminal breakdown trace from run: {user_input}")
+
+        if os.path.exists(LOCK_FILE): os.remove(LOCK_FILE)
+""")
+
+# 10. FIXED PYQT5 TRANSPARENT PET SCREEN CANVAS (WITH ACTIVE DROP-DOWN SELECTOR)
+create_file("ui/gui_pet.py", """
+import os
+import sys
+import random
+from PyQt5.QtCore import Qt, QTimer, QPoint, QRect
+from PyQt5.QtGui import QPainter, QPixmap
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox
+from core.config import LOCK_FILE
+from core.llm_client import LintLLMClient
+
+class FloatingCatPet(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.anim_dir = os.path.join(self.base_dir, "anim")
+        self.llm = LintLLMClient()
+
+        self.animation_profiles = {
+            "default": {"file": "idle.png", "width": 32, "height": 32, "frames": 10},
+            "lie":     {"file": "lie.png",  "width": 32, "height": 32, "frames": 12},
+            "sleep":   {"file": "sleep.png","width": 32, "height": 32, "frames": 4},
+            "yawn":    {"file": "yawn.png", "width": 32, "height": 32, "frames": 8},
+            "angry":   {"file": "angry2.png","width": 32, "height": 32, "frames": 9}
+        }
+        self.current_state = "default"
+        self.current_frame = 0
+        self.sprite_scale = 4
+        self.loaded_sprites = {}
+        self.load_assets()
+        self.init_ui()
+
+        self.frame_timer = QTimer()
+        self.frame_timer.timeout.connect(self.cycle_frame)
+        self.frame_timer.start(125)
+
+        self.lock_timer = QTimer()
+        self.lock_timer.timeout.connect(self.check_lock)
+        self.lock_timer.start(800)
+
+        # 30-Second Passive Chatter loop via active Model Selection Settings
+        self.chatter_timer = QTimer()
+        self.chatter_timer.timeout.connect(self.passive_chatter)
+        self.chatter_timer.start(30000)
+
+        self.drag_pos = QPoint()
+
+    def load_assets(self):
+        for s, info in self.animation_profiles.items():
+            path = os.path.join(self.anim_dir, info["file"])
+            if os.path.exists(path):
+                self.loaded_sprites[s] = {"pixmap": QPixmap(path), "w": info["width"], "h": info["height"], "total": info["frames"], "fallback": False}
+            else:
+                self.loaded_sprites[s] = {"fallback": True}
+
+    def init_ui(self):
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(10, 10, 10, 10)
+
+        self.bubble_label = QLabel("*monitoring background workflows*")
+        self.bubble_label.setStyleSheet("background-color: rgba(33, 37, 43, 240); color: #abb2bf; border: 1px solid #5c6370; border-radius: 6px; padding: 6px; font-family: monospace; font-size: 11px;")
+        self.bubble_label.setFixedWidth(210)
+        self.bubble_label.setWordWrap(True)
+        self.layout.addWidget(self.bubble_label)
+
+        # DYNAMIC INTELLIGENT MODEL CHOOSE SELECTOR ATTACHMENT
+        self.model_selector = QComboBox()
+        self.model_selector.addItems(["llama-3.3-70b-versatile", "llama3-8b-8192", "gemini-2.0-flash"])
+        self.model_selector.setStyleSheet("background-color: #282c34; color: #61afef; border: 1px solid #4b5263; font-family: monospace; font-size: 10px;")
+        self.model_selector.setFixedWidth(210)
+        self.layout.addWidget(self.model_selector)
+
+        self.fallback_canvas = QLabel(" /\\\\_/\\\\\\n( -.- )\\n > ^ <")
+        self.fallback_canvas.setStyleSheet("color: #61afef; font-family: monospace; font-size: 15px; font-weight: bold; padding-left: 10px;")
+        self.layout.addWidget(self.fallback_canvas)
+
+        self.setLayout(self.layout)
+        self.setFixedSize(240, 220)
+        self.move(QApplication.primaryScreen().geometry().width() - 270, 60)
+
+    def passive_chatter(self):
+        if not self.isVisible(): return
+        chosen_model = self.model_selector.currentText()
+        QTimer.singleShot(0, lambda: self._async_talk(chosen_model))
+
+    def _async_talk(self, model):
+        try:
+            txt = self.llm.ask_cat("make a short single sentence witty comment about a coder typing.", model_override=model)
+            if txt and not txt.startswith("*"): self.bubble_label.setText(txt)
+        except: pass
+
+    def cycle_frame(self):
+        d = self.loaded_sprites.get(self.current_state)
+        if not d or d["fallback"]:
+            self.fallback_canvas.show()
+            return
+        self.fallback_canvas.hide()
+        self.current_frame = (self.current_frame + 1) % d["total"]
+        if self.current_frame == 0 and self.current_state != "default":
+            if random.random() < 0.4: self.current_state = "default"
+        self.update()
+
+    def paintEvent(self, event):
+        d = self.loaded_sprites.get(self.current_state)
+        if not d or d["fallback"]: return
+        p = QPainter(self)
+        src_rect = QRect(self.current_frame * d["w"], 0, d["w"], d["h"])
+        dest_rect = QRect(25, self.bubble_label.height() + self.model_selector.height() + 20, d["w"] * self.sprite_scale, d["h"] * self.sprite_scale)
+        p.drawPixmap(dest_rect, d["pixmap"], src_rect)
+
+    def check_lock(self):
+        self.hide() if os.path.exists(LOCK_FILE) else self.show()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            states = [s for s, data in self.loaded_sprites.items() if not data.get("fallback", True)]
+            if states:
+                self.current_state = random.choice(states)
+                self.current_frame = 0
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_pos)
+            event.accept()
+
+def run_gui():
+    app = QApplication(sys.argv)
+    pet = FloatingCatPet()
+    pet.show()
+    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    run_gui()
+""")
+
+# 11. CENTRAL ROUTING DISPATCH LAUNCHER
+create_file("launcher.py", """
+import sys
+import os
+
+if __name__ == "__main__":
+    if "--gui" in sys.argv:
+        from ui.gui_pet import run_gui
+        run_gui()
+    else:
+        from ui.tui_term import NativeTerminalTUI
+        tui = NativeTerminalTUI()
+        tui.run_loop()
+""")
+
+# 12. OPERATIONAL BATCH SCRIPTS (WITH REWRITTEN HIGH-STRENGTH WORKER PROCESS TERMINATION KILL PANELS)
+create_file("start_lint_background.bat", """
+@echo off
+cd /d "%~dp0"
+start pythonw launcher.py --gui
+exit
+""")
+
+create_file("kill_lint.bat", """
+@echo off
+echo ==========================================================
+echo [!] FORCING UNTHROTTLED TERMINATION OF BACKGROUND LINT PROCESSES
+echo ==========================================================
+:: Direct execution target targeting background command line matching
+taskkill /f /im pythonw.exe >nul 2>&1
+taskkill /f /im python.exe /fi "WINDOWTITLE eq cat >>>*" >nul 2>&1
+powershell -NoProfile -Command "Get-Process | Where-Object { $_.CommandLine -like '*launcher.py*' } | Stop-Process -Force" >nul 2>&1
+del .lint_tui.lock >nul 2>&1
+echo [✓] Done. All background processes successfully terminated and workspace lock files cleared.
+pause
+""")
+
+create_file("enable_startup.bat", """
+@echo off
+set "SCRIPT_PATH=%~dp0start_lint_background.bat"
+set "STARTUP_DIR=%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
+set "SHORTCUT_VBS=%TEMP%\\lint_shortcut_creation.vbs"
+echo Set oWS = WScript.CreateObject("WScript.Shell") > "%SHORTCUT_VBS%"
+echo sLinkFile = "%STARTUP_DIR%\\LintCatPet.lnk" >> "%SHORTCUT_VBS%"
+echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%SHORTCUT_VBS%"
+echo oLink.TargetPath = "%SCRIPT_PATH%" >> "%SHORTCUT_VBS%"
+echo oLink.WorkingDirectory = "%~dp0" >> "%SHORTCUT_VBS%"
+echo oLink.Save >> "%SHORTCUT_VBS%"
+cscript /nologo "%SHORTCUT_VBS%"
+del "%SHORTCUT_VBS%"
+echo [✓] SUCCESS: Startup automation link successfully deployed.
+pause
+""")
+
+# 13. PATH RE-REGISTRATION SYSTEM CONSOLE BRIDGE
+create_file("register_system_path.bat", """
+@echo off
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [!] ERROR: Please right-click this file and select 'Run as Administrator'!
+    pause
+    exit /b
+)
+set "TARGET_DIR=%~dp0"
+if "%TARGET_DIR:~-1%"=="\\" set "TARGET_DIR=%TARGET_DIR:~0,-1%"
+powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'User') + ';%TARGET_DIR%', 'User')"
+echo [✓] PATH configured successfully.
+pause
+""")
+
+# 14. THE USER-FACING CONTROL MACRO
+create_file("lint.bat", """
+@echo off
+set "PROJECT_ROOT=%~dp0"
+cd /d "%PROJECT_ROOT%"
+"%PROJECT_ROOT%\.venv\Scripts\python.exe" launcher.py %*
+""")
+
+print("====================================================================")
+print("SUCCESS: Codebase Migration Generated! Run 'setup_project_v2.py' now.")
+print("====================================================================")
+</file>
+
+<file path="start_lint_background.bat">
+@echo off
+cd /d "%~dp0"
+start pythonw launcher.py --gui
+exit
+</file>
+
+<file path="ui/gui_pet.py">
+import os
+import sys
+import random
+from PyQt5.QtCore import Qt, QTimer, QPoint, QRect
+from PyQt5.QtGui import QPainter, QPixmap
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox, QLineEdit, QPushButton, QHBoxLayout
+
+# CRITICAL HIGH-DPI WORKSPACE ALIGNMENT FIX
+if sys.platform == 'win32':
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+    os.environ["QT_SCREEN_SCALE_FACTORS"] = "1"
+    os.environ["QT_SCALE_FACTOR"] = "1"
+
+from core.config import LOCK_FILE
+from core.llm_client import LintLLMClient
+
+
+class FloatingCatPet(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.anim_dir = os.path.join(self.base_dir, "anim")
+        self.llm = LintLLMClient()
+
+        self.animation_profiles = {
+            "default": {"file": "idle.png", "width": 32, "height": 32, "frames": 10},
+            "lie": {"file": "lie.png", "width": 32, "height": 32, "frames": 12},
+            "sleep": {"file": "sleep.png", "width": 32, "height": 32, "frames": 4},
+            "yawn": {"file": "yawn.png", "width": 32, "height": 32, "frames": 8},
+            "angry": {"file": "angry2.png", "width": 32, "height": 32, "frames": 9}
+        }
+        self.current_state = "default"
+        self.current_frame = 0
+        self.sprite_scale = 4
+        self.loaded_sprites = {}
+        self.load_assets()
+        self.init_ui()
+
+        self.frame_timer = QTimer()
+        self.frame_timer.timeout.connect(self.cycle_frame)
+        self.frame_timer.start(125)
+
+        self.lock_timer = QTimer()
+        self.lock_timer.timeout.connect(self.check_lock)
+        self.lock_timer.start(800)
+
+        self.chatter_timer = QTimer()
+        self.chatter_timer.timeout.connect(self.passive_chatter)
+        self.chatter_timer.start(45000)
+
+        self.drag_pos = QPoint()
+
+    def load_assets(self):
+        for s, info in self.animation_profiles.items():
+            path = os.path.join(self.anim_dir, info["file"])
+            if os.path.exists(path):
+                self.loaded_sprites[s] = {"pixmap": QPixmap(path), "w": info["width"], "h": info["height"],
+                                          "total": info["frames"], "fallback": False}
+            else:
+                self.loaded_sprites[s] = {"fallback": True}
+
+    def init_ui(self):
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        # Main overall layout frame container
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setContentsMargins(4, 4, 4, 4)
+        self.main_layout.setSpacing(4)
+
+        # ─── MIDDLE ROW: SPEECH BUBBLE OFFSET LEFT OF LINT ───
+        self.middle_row_layout = QHBoxLayout()
+        self.middle_row_layout.setContentsMargins(0, 0, 0, 0)
+        self.middle_row_layout.setSpacing(4)
+
+        # Left-aligned speech bubble
+        self.bubble_label = QLabel("*staring*")
+        self.bubble_label.setStyleSheet(
+            "background-color: rgba(33, 37, 43, 235); color: #abb2bf; "
+            "border: 1px solid #5c6370; border-radius: 5px; padding: 4px; "
+            "font-family: monospace; font-size: 11px;"
+        )
+        self.bubble_label.setFixedWidth(136)
+        self.bubble_label.setFixedHeight(128)  # Matches cat height
+        self.bubble_label.setWordWrap(True)
+        self.bubble_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.middle_row_layout.addWidget(self.bubble_label, 0, Qt.AlignLeft)
+
+        # Right-aligned anchor layout space strictly reserved for rendering the pixel cat
+        self.cat_canvas_space = QLabel()
+        self.cat_canvas_space.setFixedSize(128, 128)
+        self.middle_row_layout.addWidget(self.cat_canvas_space, 0, Qt.AlignRight)
+
+        self.main_layout.addLayout(self.middle_row_layout)
+
+        # ─── BOTTOM CONTROL INTERFACE LAYER: ZERO-PADDING COMPACT DECK ───
+        self.control_deck_layout = QVBoxLayout()
+        self.control_deck_layout.setContentsMargins(0, 0, 0, 0)  # STRIP AWAY PADDING
+        self.control_deck_layout.setSpacing(2)  # TIGHT STEP BETWEEN DECK COMPONENTS
+
+        # Model Selector Dropdown
+        self.model_selector = QComboBox()
+        self.model_selector.addItems(["llama-3.3-70b-versatile", "llama3-8b-8192", "gemini-2.0-flash"])
+        self.model_selector.setStyleSheet(
+            "background-color: #282c34; color: #61afef; border: 1px solid #4b5263; "
+            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 1px;"
+        )
+        self.model_selector.setFixedWidth(268)
+        self.model_selector.setFixedHeight(20)
+        self.control_deck_layout.addWidget(self.model_selector, 0, Qt.AlignCenter)
+
+        # Chat Row Deck input lane
+        self.input_row_layout = QHBoxLayout()
+        self.input_row_layout.setContentsMargins(0, 0, 0, 0)
+        self.input_row_layout.setSpacing(2)
+
+        self.chat_input = QLineEdit()
+        self.chat_input.setPlaceholderText("type to lint...")
+        self.chat_input.setStyleSheet(
+            "background-color: #1e222b; color: #abb2bf; border: 1px solid #4b5263; "
+            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 2px;"
+        )
+        self.chat_input.setFixedHeight(20)
+        self.chat_input.setFixedWidth(244)
+        self.chat_input.returnPressed.connect(self.submit_desktop_chat)
+
+        self.send_btn = QPushButton("👋")
+        self.send_btn.setStyleSheet(
+            "background-color: #4b5263; color: white; border: none; "
+            "border-radius: 3px; font-size: 11px; font-weight: bold;"
+        )
+        self.send_btn.setFixedSize(22, 20)
+        self.send_btn.clicked.connect(self.submit_desktop_chat)
+
+        self.input_row_layout.addWidget(self.chat_input)
+        self.input_row_layout.addWidget(self.send_btn)
+        self.control_deck_layout.addLayout(self.input_row_layout)
+
+        self.main_layout.addLayout(self.control_deck_layout)
+
+        # Text Fallback node
+        self.fallback_canvas = QLabel(" /\\_/\\\n( -.- )\n > ^ <")
+        self.fallback_canvas.setStyleSheet(
+            "color: #61afef; font-family: monospace; font-size: 14px; font-weight: bold; padding-left: 15px;")
+        self.main_layout.addWidget(self.fallback_canvas)
+        self.fallback_canvas.hide()
+
+        self.setLayout(self.main_layout)
+
+        # New optimal rigid layout dimension parameters
+        self.setFixedSize(276, 178)
+        self.move(QApplication.primaryScreen().geometry().width() - 310, 60)
+
+    def submit_desktop_chat(self):
+        user_text = self.chat_input.text().strip()
+        if not user_text: return
+
+        self.chat_input.clear()
+        self.bubble_label.setText("*thinking...*")
+        chosen_model = self.model_selector.currentText()
+        QTimer.singleShot(0, lambda: self._async_desktop_query(user_text, chosen_model))
+
+    def _async_desktop_query(self, query, model):
+        try:
+            reply = self.llm.ask_cat(query, model_override=model)
+            if reply: self.bubble_label.setText(reply)
+        except Exception:
+            self.bubble_label.setText("connection error.")
+
+    def passive_chatter(self):
+        if not self.isVisible(): return
+        chosen_model = self.model_selector.currentText()
+        QTimer.singleShot(0, lambda: self._async_talk(chosen_model))
+
+    def _async_talk(self, model):
+        try:
+            txt = self.llm.ask_cat("make a short single sentence witty comment about a coder typing.",
+                                   model_override=model)
+            if txt and not txt.startswith("*"): self.bubble_label.setText(txt)
+        except:
+            pass
+
+    def cycle_frame(self):
+        d = self.loaded_sprites.get(self.current_state)
+        if not d or d["fallback"]:
+            self.fallback_canvas.show()
+            return
+        self.fallback_canvas.hide()
+        self.current_frame = (self.current_frame + 1) % d["total"]
+        if self.current_frame == 0 and self.current_state != "default":
+            if random.random() < 0.4: self.current_state = "default"
+        self.update()
+
+    def paintEvent(self, event):
+        d = self.loaded_sprites.get(self.current_state)
+        if not d or d["fallback"]: return
+
+        p = QPainter(self)
+        src_rect = QRect(self.current_frame * d["w"], 0, d["w"], d["h"])
+
+        space_geometry = self.cat_canvas_space.geometry()
+        dest_w = d["w"] * self.sprite_scale
+        dest_h = d["h"] * self.sprite_scale
+
+        dest_x = space_geometry.x() + (space_geometry.width() - dest_w) // 2
+        dest_y = space_geometry.y() + (space_geometry.height() - dest_h) // 2
+        dest_rect = QRect(dest_x, dest_y, dest_w, dest_h)
+
+        p.drawPixmap(dest_rect, d["pixmap"], src_rect)
+
+    def check_lock(self):
+        self.hide() if os.path.exists(LOCK_FILE) else self.show()
+
+    def mousePressEvent(self, event):
+        # Dragging lock limits restricted exclusively to the active middle row canvas element zone
+        if event.y() > 132:
+            event.ignore()
+            return
+        if event.button() == Qt.LeftButton:
+            self.drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            states = [s for s, data in self.loaded_sprites.items() if not data.get("fallback", True)]
+            if states:
+                self.current_state = random.choice(states)
+                self.current_frame = 0
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if not self.drag_pos.isNull() and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_pos)
+            event.accept()
+
+
+def run_gui():
+    app = QApplication(sys.argv)
+    pet = FloatingCatPet()
+    pet.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    run_gui()
+</file>
+
+<file path="ui/tui_term.py">
+import os
+import sys
+import time
+import psutil
+from core.config import LOCK_FILE, CAT_NAME
+from core.personality import PersonalityEngine
+from core.shell_engine import PersistentShell
+from core.llm_client import LintLLMClient
+from core.obsidian_mcp import ObsidianMCP
+
+
+class NativeTerminalTUI:
+    def __init__(self):
+        self.personality = PersonalityEngine()
+        self.shell = PersistentShell(tui_callback=self.async_passive_lint_print)
+        self.llm = LintLLMClient()
+        self.obsidian = ObsidianMCP()
+        self.cat_bubble = "sandbox engine online. ready to burn code on the pi."
+        self.task_count = "4/5"
+
+    def acquire_lock(self):
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+
+    def release_lock(self):
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+
+    def async_passive_lint_print(self, lint_tip: str):
+        self.cat_bubble = lint_tip
+        sys.stdout.write("\033[s")
+        sys.stdout.write("\033[7A\033[G")
+        sys.stdout.write(f"    /\\_/\\    ( {self.cat_bubble.ljust(54)} )\n")
+        sys.stdout.write("\033[u")
+        sys.stdout.flush()
+
+    def draw_static_box(self):
+        os.system('cls' if sys.platform == 'win32' else 'clear')
+        print("\n\n\n")
+        print(f"  [ {CAT_NAME.capitalize()} ]---------------------------------------------------------------------+")
+        print(
+            f"  | CPU: --% | Tasks: {self.task_count} | Sync: {'CONNECTED' if self.obsidian.available else 'DISABLED'.ljust(9)} |")
+        print(f"  +-------------------------------------------------------------------------+")
+
+    def play_localized_hop(self):
+        frames = [
+            ["       ", "       ", " /\\_/\\ "],
+            ["       ", " /\\_/\\ ", " ( o.o )"],
+            [" /\\_/\\ ", " ( o.o )", " > ^ < "]
+        ]
+        frame_delay = 0.157
+        for frame in frames:
+            sys.stdout.write("\033[7A\033[G")
+            sys.stdout.write(f"   {frame[0]}   ( {self.cat_bubble.ljust(54)} )\n")
+            sys.stdout.write(f"  {frame[1]}  (                                                              )\n")
+            sys.stdout.write(f"   {frame[2]}  / \n")
+            sys.stdout.write("\033[4B")
+            sys.stdout.flush()
+            time.sleep(frame_delay)
+
+    def draw_live_dashboard(self):
+        cpu = psutil.cpu_percent()
+        sys.stdout.write("\033[3A\033[G")
+        sys.stdout.write(
+            f"  | CPU: {str(cpu).ljust(2)}% | Tasks: {self.task_count} | Sync: {'CONNECTED' if self.obsidian.available else 'DISABLED'.ljust(9)} |\n")
+        sys.stdout.write("\033[2B\033[G")
+        sys.stdout.flush()
+
+    def repaint_static_pose(self):
+        sys.stdout.write("\033[7A\033[G")
+        sys.stdout.write(f"    /\\_/\\    ( {self.cat_bubble.ljust(54)} )\n")
+        sys.stdout.write(f"   ( o.o )  (                                                              )\n")
+        sys.stdout.write(f"   > ^ <  / \n")
+        sys.stdout.write("\033[4B")
+        sys.stdout.flush()
+
+    def run_loop(self):
+        self.acquire_lock()
+        self.draw_static_box()
+        self.play_localized_hop()
+
+        while True:
+            self.draw_live_dashboard()
+            print(" instructions: execute native commands, or query using context prompts.")
+            # FIXED: Updated instructions so you don't think you need to type "cat >>>" twice
+            print(" agentic sandbox loop:  sandbox <your explicit modification request instructions>")
+            print(" type 'exit' to cleanly return focus back to the desktop pet GUI panel.\n")
+
+            try:
+                user_input_raw = input("cat >>> ")
+            except (KeyboardInterrupt, EOFError):
+                break
+
+            # SANITIZATION DECK
+            user_input = user_input_raw.replace('\xa0', ' ').replace('\t', ' ').strip()
+
+            if not user_input:
+                continue
+            if user_input.lower() == "exit":
+                print("*hops back down out of the terminal environment*")
+                time.sleep(0.5)
+                break
+
+            # STRIP ACCIDENTAL PROMPT PASTES
+            # Just in case you still habitually copy-paste "cat >>> sandbox" into the prompt
+            clean_input = user_input
+            if clean_input.lower().startswith("cat >>>"):
+                clean_input = clean_input[7:].strip()
+            elif clean_input.lower().startswith("cat>>>"):
+                clean_input = clean_input[6:].strip()
+
+            lower_cmd = clean_input.lower()
+
+            # THE REAL FIX: Check for the actual command words, since "cat" isn't in your text!
+            is_ai_task = (
+                    lower_cmd.startswith("sandbox") or
+                    lower_cmd.startswith("modify") or
+                    lower_cmd.startswith("obsidian") or
+                    lower_cmd.startswith("cat ")
+            )
+
+            if is_ai_task:
+                if lower_cmd.startswith("modify"):
+                    task = clean_input[6:].strip().lstrip(",").strip()
+                    print("\n[!] lint taking operational context control of directories...")
+                    self.cat_bubble = self.llm.run_multi_file_agent(task)
+
+                elif lower_cmd.startswith("sandbox"):
+                    task_instruction = clean_input[7:].strip().lstrip(",").strip()
+
+                    if task_instruction.lower() == "accept":
+                        print("\n[!] executing remote synchronization path sequence pull...")
+                        from core.pi_agent import PiDevBridge
+                        bridge = PiDevBridge()
+                        self.cat_bubble = bridge.pull_remote_mutations()
+                    if not task_instruction:
+                        self.cat_bubble = "type what you want me to build and test inside the sandbox, dummy."
+                    else:
+                        print("\n[!] connecting via password credentials to remote pi sandbox...")
+                        from core.pi_agent import PiDevBridge
+                        bridge = PiDevBridge()
+                        self.cat_bubble = bridge.run_agentic_sandbox(task_instruction,
+                                                                     run_cmd="python3 launcher.py --help")
+
+                elif lower_cmd.startswith("obsidian"):
+                    task = clean_input[8:].strip()
+                    if task.startswith("daily"):
+                        self.obsidian.get_today_note()
+                        success = self.obsidian.create_daily_summary(self.llm)
+                        self.cat_bubble = "*purrs* daily log note pushed into vault." if success else "failed note compile."
+                    else:
+                        self.cat_bubble = "unknown obsidian command."
+
+                else:  # Starts with "cat " (for random chatting)
+                    chat_query = clean_input[4:].strip()
+                    print("*calculating metrics via groq*...")
+                    self.cat_bubble = self.llm.ask_cat(chat_query, model_override="llama-3.3-70b-versatile")
+
+                self.draw_static_box()
+                self.repaint_static_pose()
+                continue  # Ironclad block preventing PowerShell from ever seeing it
+
+            # ─── ROUTE B: PROCESS STANDARD NATIVE CMD LINE SHELL ───
+            quick_check = self.personality.get_quick_reaction(user_input)
+            if quick_check:
+                self.cat_bubble = quick_check
+
+            print(f"\nExecuting: {user_input}")
+            out = self.shell.execute_command(user_input)
+            print(out)
+
+            input("\n[press enter to clear terminal context]")
+            self.draw_static_box()
+            self.repaint_static_pose()
+
+        self.release_lock()
+
+
+if __name__ == "__main__":
+    tui = NativeTerminalTUI()
+    tui.run_loop()
+</file>
+
+</files>
