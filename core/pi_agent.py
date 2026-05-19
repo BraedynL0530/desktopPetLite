@@ -106,7 +106,8 @@ class PiDevBridge:
         )
         return "".join(diff)
 
-    def _render_diff_report(self, task_instruction, loop_notes, commands_run, per_file_diff, parse_retry_events):
+    @staticmethod
+    def _render_diff_report(task_instruction, loop_notes, commands_run, per_file_diff, parse_retry_events):
         report_lines = [
             "# Lint Sandbox Agent Report",
             f"**Task**: {task_instruction}",
@@ -236,7 +237,7 @@ class PiDevBridge:
                         break
                     except Exception as parse_error:
                         last_parse_error = str(parse_error)
-                        if parse_attempt == self.MAX_PARSE_RETRIES:
+                        if parse_attempt == self.MAX_PARSE_ATTEMPTS - 1:
                             parse_retry_events.append(
                                 f"loop {current_iteration}: parse failed after {parse_attempt + 1} attempts ({last_parse_error})."
                             )
@@ -296,7 +297,7 @@ class PiDevBridge:
                     break
 
             else:
-                # Python for-else: this runs only when no break occurred, i.e. max loop count was reached.
+                # Python for-else: this runs only when no break occurred, i.e., max loop count was reached.
                 narrative_notes.append(f"Reached max loop count ({self.max_loops}) before completion signal.")
 
             if remote_mutations_log:
