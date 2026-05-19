@@ -1,2 +1,4 @@
 .env
 diff.md
+__pycache__/
+*.pyc
