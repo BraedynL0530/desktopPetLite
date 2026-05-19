@@ -56,6 +56,36 @@ class TestMemoryStore(unittest.TestCase):
             self.assertIn("first", payload)
             self.assertIn("next question", payload)
 
+    def test_llm_client_uses_shared_memory_file_from_env(self):
+        captured = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "memory.json")
+            old = os.environ.get("LINT_MEMORY_FILE")
+            os.environ["LINT_MEMORY_FILE"] = path
+            try:
+                first = LintLLMClient()
+                first.groq_key = "test-key"
+                first.memory.add_entry("chat", "hello", "there")
+
+                second = LintLLMClient()
+                second.groq_key = "test-key"
+
+                def _fake_post(url, headers=None, json=None, timeout=0):
+                    captured["json"] = json
+                    return _MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
+
+                with patch("core.llm_client.requests.post", side_effect=_fake_post):
+                    second.ask_cat("follow-up")
+            finally:
+                if old is None:
+                    os.environ.pop("LINT_MEMORY_FILE", None)
+                else:
+                    os.environ["LINT_MEMORY_FILE"] = old
+
+            payload = captured["json"]["messages"][1]["content"]
+            self.assertIn("memory:", payload)
+            self.assertIn("hello", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

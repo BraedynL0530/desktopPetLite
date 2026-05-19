@@ -5,6 +5,8 @@ from core.config import GROQ_API_KEY, GEMINI_API_KEY
 from core.memory_store import LintMemoryStore
 
 class LintLLMClient:
+    MEMORY_PREVIEW_CHARS = 600
+
     def __init__(self):
         self.groq_key = GROQ_API_KEY
         self.gemini_key = GEMINI_API_KEY
@@ -15,10 +17,10 @@ class LintLLMClient:
             "no emojis. use * actions instead (e.g. *stares*). perpetually unimpressed."
         )
 
-    def ask_cat(self, query: str, context: str = "", model_override: str = None, memory_context: str = None) -> str:
+    def ask_cat(self, query: str, context: str = "", model_override: str = None) -> str:
         # Default fallback model strategy
         active_model = model_override if model_override else "llama-3.3-70b-versatile"
-        resolved_memory_context = self.memory.get_context() if memory_context is None else memory_context
+        resolved_memory_context = self.memory.get_context()
         memory_block = f"memory: {resolved_memory_context}\n\n" if resolved_memory_context else ""
         user_payload = f"context: {context}\n\n{memory_block}query: {query}"
 
@@ -110,4 +112,4 @@ class LintLLMClient:
         preview = self.memory.get_context()
         if not preview:
             return details
-        return f"{details}\n{preview[-600:]}"
+        return f"{details}\n{preview[-self.MEMORY_PREVIEW_CHARS:]}"
