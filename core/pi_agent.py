@@ -13,6 +13,8 @@ from core.llm_client import LintLLMClient
 class PiDevBridge:
     SNAPSHOT_EXTENSIONS = (".py", ".txt", ".json", ".md", ".env", ".bat", ".yml", ".yaml")
     ARCHIVE_EXCLUDE_PATTERNS = (".git", "__pycache__", ".venv", ".idea")
+    MAX_PARSE_RETRIES = 2
+    MAX_PARSE_ATTEMPTS = MAX_PARSE_RETRIES + 1
 
     def __init__(self, pi_host="lintbox.local", pi_user="pi"):
         self.host = pi_host
@@ -228,13 +230,13 @@ class PiDevBridge:
 
                 payload = None
                 last_parse_error = None
-                for parse_attempt in range(0, 3):
+                for parse_attempt in range(0, self.MAX_PARSE_ATTEMPTS):
                     try:
                         payload = self._normalize_llm_payload(raw_json_reply)
                         break
                     except Exception as parse_error:
                         last_parse_error = str(parse_error)
-                        if parse_attempt >= 2:
+                        if parse_attempt >= self.MAX_PARSE_ATTEMPTS - 1:
                             parse_retry_events.append(
                                 f"loop {current_iteration}: parse failed after {parse_attempt + 1} attempts ({last_parse_error})."
                             )
