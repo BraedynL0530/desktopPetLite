@@ -88,7 +88,8 @@ The report includes:
 
 - Task summary
 - Human-readable rationale
-- Commands run in sandbox
+- Commands executed/requested in sandbox
+- JSON parse retry/recovery notes
 - Unified diffs (`diff` format) for each changed file
 
 ### Acceptance Flow
