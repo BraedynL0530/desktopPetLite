@@ -69,7 +69,19 @@ Any command that does not match an agent command prefix is executed in the persi
 - `sandbox accept`: apply pending `.sandbox_mutations.json` changes from Pi to the local project.
 - `sandbox clear <confirmation phrase>`: clear remote sandbox workspace contents only when the confirmation phrase is exactly `confirm clear sandbox`.
 - `obsidian daily`: run Obsidian daily summary flow.
+- `memory show`: display shared memory summary/preview.
+- `memory clear`: clear shared memory store.
 - `cat <prompt>`: conversational LLM response.
+
+## GUI Agent Controls
+
+GUI mode now includes agent controls:
+
+- `agent` button: run any agent command (`modify ...`, `sandbox ...`, `obsidian daily`, `memory clear/show`)
+- `daily` button: quick `obsidian daily`
+- `mem clr` button: quick `memory clear`
+
+Long-running agent tasks in GUI run in worker threads so the UI remains responsive.
 
 ## Raspberry Pi Agentic Sandbox
 
