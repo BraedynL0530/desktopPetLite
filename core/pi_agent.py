@@ -230,13 +230,13 @@ class PiDevBridge:
 
                 payload = None
                 last_parse_error = None
-                for parse_attempt in range(0, self.MAX_PARSE_ATTEMPTS):
+                for parse_attempt in range(self.MAX_PARSE_ATTEMPTS):
                     try:
                         payload = self._normalize_llm_payload(raw_json_reply)
                         break
                     except Exception as parse_error:
                         last_parse_error = str(parse_error)
-                        if parse_attempt >= self.MAX_PARSE_ATTEMPTS - 1:
+                        if parse_attempt == self.MAX_PARSE_RETRIES:
                             parse_retry_events.append(
                                 f"loop {current_iteration}: parse failed after {parse_attempt + 1} attempts ({last_parse_error})."
                             )
@@ -296,6 +296,7 @@ class PiDevBridge:
                     break
 
             else:
+                # Python for-else: this runs only when no break occurred, i.e. max loop count was reached.
                 narrative_notes.append(f"Reached max loop count ({self.max_loops}) before completion signal.")
 
             if remote_mutations_log:

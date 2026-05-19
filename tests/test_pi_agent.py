@@ -34,7 +34,7 @@ class TestNormalizeLlmPayload(unittest.TestCase):
 
 class TestDiffReport(unittest.TestCase):
     def test_report_includes_parse_recovery_section(self):
-        bridge = PiDevBridge()
+        bridge = PiDevBridge.__new__(PiDevBridge)
         report = bridge._render_diff_report(
             "task",
             ["note"],
