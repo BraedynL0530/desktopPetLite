@@ -14,7 +14,6 @@ class PiDevBridge:
     SNAPSHOT_EXTENSIONS = (".py", ".txt", ".json", ".md", ".env", ".bat", ".yml", ".yaml")
     ARCHIVE_EXCLUDE_PATTERNS = (".git", "__pycache__", ".venv", ".idea")
     MAX_PARSE_RETRIES = 2
-    MAX_PARSE_ATTEMPTS = MAX_PARSE_RETRIES + 1
 
     def __init__(self, pi_host="lintbox.local", pi_user="pi"):
         self.host = pi_host
@@ -186,6 +185,7 @@ class PiDevBridge:
             remote_mutations_log = {}
             baseline_snapshot = self._build_project_snapshot()
 
+            completed_before_loop_limit = False
             for current_iteration in range(1, self.max_loops + 1):
                 print(f"    -> [loop {current_iteration}/{self.max_loops}] testing code on pi architecture...")
                 _, stdout, stderr = ssh.exec_command(f"cd {execution_path} && {run_cmd}")
@@ -231,20 +231,21 @@ class PiDevBridge:
 
                 payload = None
                 last_parse_error = None
-                for parse_attempt in range(self.MAX_PARSE_ATTEMPTS):
+                max_parse_attempts = self.MAX_PARSE_RETRIES + 1
+                for parse_attempt in range(1, max_parse_attempts + 1):
                     try:
                         payload = self._normalize_llm_payload(raw_json_reply)
                         break
                     except Exception as parse_error:
                         last_parse_error = str(parse_error)
-                        if parse_attempt == self.MAX_PARSE_ATTEMPTS - 1:
+                        if parse_attempt == max_parse_attempts:
                             parse_retry_events.append(
-                                f"loop {current_iteration}: parse failed after {parse_attempt + 1} attempts ({last_parse_error})."
+                                f"loop {current_iteration}: parse failed after {parse_attempt} attempts ({last_parse_error})."
                             )
                             narrative_notes.append("LLM payload could not be parsed after JSON-repair retries; loop terminated.")
                             break
                         parse_retry_events.append(
-                            f"loop {current_iteration}: parse retry {parse_attempt + 1} triggered ({last_parse_error})."
+                            f"loop {current_iteration}: parse retry {parse_attempt} triggered ({last_parse_error})."
                         )
                         repair_prompt = (
                             "Your previous response was not parseable JSON.\n"
@@ -263,6 +264,7 @@ class PiDevBridge:
                         raw_json_reply = self.llm.ask_cat(repair_prompt, context=ctx_string, model_override="gemini-2.0-flash")
 
                 if payload is None:
+                    completed_before_loop_limit = True
                     break
 
                 mutations = payload.get("mutations") or {}
@@ -280,6 +282,7 @@ class PiDevBridge:
                         narrative_notes.append("Agent signaled completion (`done: true`) with no additional file mutations.")
                     if not narrative_notes:
                         narrative_notes.append("Execution passed and no additional edits were required.")
+                    completed_before_loop_limit = True
                     break
 
                 for rel_path, new_content in mutations.items():
@@ -294,10 +297,10 @@ class PiDevBridge:
 
                 if done_signal:
                     narrative_notes.append("Agent signaled completion after applying final mutation batch.")
+                    completed_before_loop_limit = True
                     break
 
-            else:
-                # Python for-else: this runs only when no break occurred, i.e., max loop count was reached.
+            if not completed_before_loop_limit and self.max_loops > 0:
                 narrative_notes.append(f"Reached max loop count ({self.max_loops}) before completion signal.")
 
             if remote_mutations_log:
