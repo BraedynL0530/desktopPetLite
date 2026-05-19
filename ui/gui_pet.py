@@ -19,6 +19,7 @@ from core.obsidian_mcp import ObsidianMCP
 
 class FloatingCatPet(QWidget):
     bubble_signal = pyqtSignal(str)
+    AGENT_COMMAND_HINT = "Enter command (obsidian daily, modify, sandbox, memory clear/show):"
 
     def __init__(self):
         super().__init__()
@@ -178,7 +179,7 @@ class FloatingCatPet(QWidget):
 
         self.setLayout(self.main_layout)
 
-        # New optimal rigid layout dimension parameters
+        # Increase window height to fit the additional agent action button row.
         self.setFixedSize(276, 202)
         self.move(QApplication.primaryScreen().geometry().width() - 310, 60)
 
@@ -187,7 +188,7 @@ class FloatingCatPet(QWidget):
         if not user_text: return
 
         self.chat_input.clear()
-        self.bubble_label.setText("*thinking...*")
+        self.bubble_signal.emit("*thinking...*")
         chosen_model = self.model_selector.currentText()
         threading.Thread(target=self._async_desktop_query, args=(user_text, chosen_model), daemon=True).start()
 
@@ -212,12 +213,12 @@ class FloatingCatPet(QWidget):
             pass
 
     def prompt_agent_command(self):
-        command, ok = QInputDialog.getText(self, "Run Agent Command", "Enter command (obsidian daily, modify, sandbox, memory clear):")
+        command, ok = QInputDialog.getText(self, "Run Agent Command", self.AGENT_COMMAND_HINT)
         if ok and command.strip():
             self.run_agent_command(command.strip())
 
     def run_agent_command(self, command: str):
-        self.bubble_label.setText("*running agent command...*")
+        self.bubble_signal.emit("*running agent command...*")
         threading.Thread(target=self._execute_agent_command, args=(command,), daemon=True).start()
 
     def _execute_agent_command(self, command: str):
@@ -236,7 +237,7 @@ class FloatingCatPet(QWidget):
                 return
 
             if lower_cmd.startswith("modify"):
-                task = command[6:].strip().lstrip(",").strip()
+                task = command[6:].strip().lstrip(",")
                 if not task:
                     self.bubble_signal.emit("modify needs an instruction.")
                     return
@@ -272,8 +273,8 @@ class FloatingCatPet(QWidget):
                 return
 
             self.bubble_signal.emit("unknown agent command.")
-        except Exception:
-            self.bubble_signal.emit("agent command failed.")
+        except Exception as e:
+            self.bubble_signal.emit(f"agent command failed: {str(e)[:80]}")
 
     def cycle_frame(self):
         d = self.loaded_sprites.get(self.current_state)

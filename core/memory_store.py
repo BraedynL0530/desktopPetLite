@@ -19,7 +19,7 @@ class LintMemoryStore:
                 payload = json.load(handle)
                 if isinstance(payload, list):
                     return payload
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             return []
         return []
 
@@ -29,7 +29,7 @@ class LintMemoryStore:
 
     def add_entry(self, kind: str, prompt: str, response: str, metadata: dict = None):
         item = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "kind": (kind or "chat").strip()[:32],
             "prompt": (prompt or "").strip()[:2000],
             "response": (response or "").strip()[:2000],

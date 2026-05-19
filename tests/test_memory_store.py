@@ -27,6 +27,13 @@ class TestMemoryStore(unittest.TestCase):
             store.clear()
             self.assertEqual(store.describe(), "memory empty (0 entries).")
 
+    def test_store_persists_across_instances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "memory.json")
+            LintMemoryStore(path=path).add_entry("chat", "persist", "yes")
+            store2 = LintMemoryStore(path=path)
+            self.assertIn("persist", store2.get_context())
+
     def test_llm_payload_includes_memory_context(self):
         captured = {}
         with tempfile.TemporaryDirectory() as tmp:
@@ -41,7 +48,7 @@ class TestMemoryStore(unittest.TestCase):
                 return _MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
 
             with patch("core.llm_client.requests.post", side_effect=_fake_post):
-                reply = client.ask_cat("next question", model_override="llama-3.3-70b-versatile")
+                reply = client.ask_cat("next question")
 
             self.assertEqual(reply, "ok")
             payload = captured["json"]["messages"][1]["content"]

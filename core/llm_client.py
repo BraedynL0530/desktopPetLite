@@ -19,7 +19,8 @@ class LintLLMClient:
         # Default fallback model strategy
         active_model = model_override if model_override else "llama-3.3-70b-versatile"
         resolved_memory_context = self.memory.get_context() if memory_context is None else memory_context
-        user_payload = f"context: {context}\n\nmemory: {resolved_memory_context}\n\nquery: {query}"
+        memory_block = f"memory: {resolved_memory_context}\n\n" if resolved_memory_context else ""
+        user_payload = f"context: {context}\n\n{memory_block}query: {query}"
 
         # ROUTE A: Use Groq for lightweight tasks
         if "llama" in active_model or "mixtral" in active_model:
