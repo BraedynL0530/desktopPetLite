@@ -1,9 +1,10 @@
 import os
 import sys
 import random
-from PyQt5.QtCore import Qt, QTimer, QPoint, QRect
+import threading
+from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, pyqtSignal
 from PyQt5.QtGui import QPainter, QPixmap
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox, QLineEdit, QPushButton, QHBoxLayout
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox, QLineEdit, QPushButton, QHBoxLayout, QInputDialog
 
 # CRITICAL HIGH-DPI WORKSPACE ALIGNMENT FIX
 if sys.platform == 'win32':
@@ -13,14 +14,18 @@ if sys.platform == 'win32':
 
 from core.config import LOCK_FILE
 from core.llm_client import LintLLMClient
+from core.obsidian_mcp import ObsidianMCP
 
 
 class FloatingCatPet(QWidget):
+    bubble_signal = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.anim_dir = os.path.join(self.base_dir, "anim")
         self.llm = LintLLMClient()
+        self.obsidian = ObsidianMCP()
 
         self.animation_profiles = {
             "default": {"file": "idle.png", "width": 32, "height": 32, "frames": 10},
@@ -35,6 +40,7 @@ class FloatingCatPet(QWidget):
         self.loaded_sprites = {}
         self.load_assets()
         self.init_ui()
+        self.bubble_signal.connect(self.bubble_label.setText)
 
         self.frame_timer = QTimer()
         self.frame_timer.timeout.connect(self.cycle_frame)
@@ -136,6 +142,31 @@ class FloatingCatPet(QWidget):
         self.input_row_layout.addWidget(self.send_btn)
         self.control_deck_layout.addLayout(self.input_row_layout)
 
+        self.agent_row_layout = QHBoxLayout()
+        self.agent_row_layout.setContentsMargins(0, 0, 0, 0)
+        self.agent_row_layout.setSpacing(2)
+
+        self.agent_btn = QPushButton("agent")
+        self.agent_btn.setFixedHeight(20)
+        self.agent_btn.clicked.connect(self.prompt_agent_command)
+
+        self.daily_btn = QPushButton("daily")
+        self.daily_btn.setFixedHeight(20)
+        self.daily_btn.clicked.connect(lambda: self.run_agent_command("obsidian daily"))
+
+        self.memory_btn = QPushButton("mem clr")
+        self.memory_btn.setFixedHeight(20)
+        self.memory_btn.clicked.connect(lambda: self.run_agent_command("memory clear"))
+
+        for btn in [self.agent_btn, self.daily_btn, self.memory_btn]:
+            btn.setStyleSheet(
+                "background-color: #4b5263; color: white; border: none; "
+                "border-radius: 3px; font-size: 10px; font-family: monospace;"
+            )
+            self.agent_row_layout.addWidget(btn)
+
+        self.control_deck_layout.addLayout(self.agent_row_layout)
+
         self.main_layout.addLayout(self.control_deck_layout)
 
         # Text Fallback node
@@ -148,7 +179,7 @@ class FloatingCatPet(QWidget):
         self.setLayout(self.main_layout)
 
         # New optimal rigid layout dimension parameters
-        self.setFixedSize(276, 178)
+        self.setFixedSize(276, 202)
         self.move(QApplication.primaryScreen().geometry().width() - 310, 60)
 
     def submit_desktop_chat(self):
@@ -158,27 +189,91 @@ class FloatingCatPet(QWidget):
         self.chat_input.clear()
         self.bubble_label.setText("*thinking...*")
         chosen_model = self.model_selector.currentText()
-        QTimer.singleShot(0, lambda: self._async_desktop_query(user_text, chosen_model))
+        threading.Thread(target=self._async_desktop_query, args=(user_text, chosen_model), daemon=True).start()
 
     def _async_desktop_query(self, query, model):
         try:
             reply = self.llm.ask_cat(query, model_override=model)
-            if reply: self.bubble_label.setText(reply)
+            if reply: self.bubble_signal.emit(reply)
         except Exception:
-            self.bubble_label.setText("connection error.")
+            self.bubble_signal.emit("connection error.")
 
     def passive_chatter(self):
         if not self.isVisible(): return
         chosen_model = self.model_selector.currentText()
-        QTimer.singleShot(0, lambda: self._async_talk(chosen_model))
+        threading.Thread(target=self._async_talk, args=(chosen_model,), daemon=True).start()
 
     def _async_talk(self, model):
         try:
             txt = self.llm.ask_cat("make a short single sentence witty comment about a coder typing.",
                                    model_override=model)
-            if txt and not txt.startswith("*"): self.bubble_label.setText(txt)
+            if txt and not txt.startswith("*"): self.bubble_signal.emit(txt)
         except:
             pass
+
+    def prompt_agent_command(self):
+        command, ok = QInputDialog.getText(self, "Run Agent Command", "Enter command (obsidian daily, modify, sandbox, memory clear):")
+        if ok and command.strip():
+            self.run_agent_command(command.strip())
+
+    def run_agent_command(self, command: str):
+        self.bubble_label.setText("*running agent command...*")
+        threading.Thread(target=self._execute_agent_command, args=(command,), daemon=True).start()
+
+    def _execute_agent_command(self, command: str):
+        lower_cmd = command.lower()
+        try:
+            if lower_cmd.startswith("obsidian"):
+                task = command[8:].strip()
+                if task.startswith("daily"):
+                    self.obsidian.get_today_note()
+                    success = self.obsidian.create_daily_summary(self.llm)
+                    msg = "*purrs* daily log note pushed into vault." if success else "failed note compile."
+                    self.llm.memory.add_entry("obsidian", "obsidian daily", msg)
+                    self.bubble_signal.emit(msg)
+                    return
+                self.bubble_signal.emit("unknown obsidian command.")
+                return
+
+            if lower_cmd.startswith("modify"):
+                task = command[6:].strip().lstrip(",").strip()
+                if not task:
+                    self.bubble_signal.emit("modify needs an instruction.")
+                    return
+                self.bubble_signal.emit(self.llm.run_multi_file_agent(task))
+                return
+
+            if lower_cmd.startswith("sandbox"):
+                from core.pi_agent import PiDevBridge
+                task_instruction = command[7:].strip().lstrip(",").strip()
+                lower_instruction = task_instruction.lower()
+                bridge = PiDevBridge()
+                if lower_instruction == "accept":
+                    self.bubble_signal.emit(bridge.pull_remote_mutations())
+                    return
+                if lower_instruction.startswith("clear"):
+                    confirm_phrase = task_instruction[len("clear"):].strip()
+                    self.bubble_signal.emit(bridge.clear_remote_sandbox(confirm_phrase))
+                    return
+                if not task_instruction:
+                    self.bubble_signal.emit("type what you want me to build and test inside the sandbox, dummy.")
+                    return
+                self.bubble_signal.emit(bridge.run_agentic_sandbox(task_instruction, run_cmd="python3 launcher.py --help"))
+                return
+
+            if lower_cmd.startswith("memory"):
+                memory_cmd = command[6:].strip().lower()
+                if memory_cmd == "clear":
+                    self.bubble_signal.emit(self.llm.memory_clear())
+                elif memory_cmd == "show":
+                    self.bubble_signal.emit(self.llm.memory_show())
+                else:
+                    self.bubble_signal.emit("memory commands: memory show | memory clear")
+                return
+
+            self.bubble_signal.emit("unknown agent command.")
+        except Exception:
+            self.bubble_signal.emit("agent command failed.")
 
     def cycle_frame(self):
         d = self.loaded_sprites.get(self.current_state)

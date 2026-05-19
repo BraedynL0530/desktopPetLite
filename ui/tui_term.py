@@ -84,6 +84,7 @@ class NativeTerminalTUI:
             print(" instructions: execute native commands, or query using context prompts.")
             print(" agentic sandbox loop:  sandbox <modification request>")
             print(" sandbox controls: sandbox accept | sandbox clear <confirmation phrase>")
+            print(" memory controls: memory show | memory clear")
             print(" type 'exit' to cleanly return focus back to the desktop pet GUI panel.\n")
 
             try:
@@ -116,6 +117,7 @@ class NativeTerminalTUI:
                     lower_cmd.startswith("sandbox") or
                     lower_cmd.startswith("modify") or
                     lower_cmd.startswith("obsidian") or
+                    lower_cmd.startswith("memory") or
                     lower_cmd.startswith("cat ")
             )
 
@@ -154,8 +156,18 @@ class NativeTerminalTUI:
                         self.obsidian.get_today_note()
                         success = self.obsidian.create_daily_summary(self.llm)
                         self.cat_bubble = "*purrs* daily log note pushed into vault." if success else "failed note compile."
+                        self.llm.memory.add_entry("obsidian", "obsidian daily", self.cat_bubble)
                     else:
                         self.cat_bubble = "unknown obsidian command."
+
+                elif lower_cmd.startswith("memory"):
+                    memory_cmd = clean_input[6:].strip().lower()
+                    if memory_cmd == "clear":
+                        self.cat_bubble = self.llm.memory_clear()
+                    elif memory_cmd == "show":
+                        self.cat_bubble = self.llm.memory_show()
+                    else:
+                        self.cat_bubble = "memory commands: memory show | memory clear"
 
                 else:  # Starts with "cat " (for random chatting)
                     chat_query = clean_input[4:].strip()

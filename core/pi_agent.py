@@ -327,6 +327,7 @@ class PiDevBridge:
             )
             with open("diff.md", "w", encoding="utf-8") as diff_file:
                 diff_file.write(diff_markdown_content)
+            self.llm.memory.add_entry("sandbox", task_instruction, "; ".join(narrative_notes[:4]))
 
             sftp.close()
             ssh.close()
