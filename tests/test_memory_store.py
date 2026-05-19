@@ -7,7 +7,7 @@ from core.llm_client import LintLLMClient
 from core.memory_store import LintMemoryStore
 
 
-class _MockResponse:
+class MockResponse:
     def __init__(self, status_code, payload):
         self.status_code = status_code
         self._payload = payload
@@ -45,7 +45,7 @@ class TestMemoryStore(unittest.TestCase):
 
             def _fake_post(url, headers=None, json=None, timeout=0):
                 captured["json"] = json
-                return _MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
+                return MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
 
             with patch("core.llm_client.requests.post", side_effect=_fake_post):
                 reply = client.ask_cat("next question")
@@ -72,7 +72,7 @@ class TestMemoryStore(unittest.TestCase):
 
                 def _fake_post(url, headers=None, json=None, timeout=0):
                     captured["json"] = json
-                    return _MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
+                    return MockResponse(200, {"choices": [{"message": {"content": "ok"}}]})
 
                 with patch("core.llm_client.requests.post", side_effect=_fake_post):
                     second.ask_cat("follow-up")

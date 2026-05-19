@@ -19,7 +19,7 @@ from core.obsidian_mcp import ObsidianMCP
 
 class FloatingCatPet(QWidget):
     bubble_signal = pyqtSignal(str)
-    AGENT_COMMAND_HINT = "Enter command (obsidian daily, modify, sandbox, memory clear/show):"
+    AGENT_COMMAND_PROMPT = "Enter command (obsidian daily, modify, sandbox, memory clear/show):"
 
     def __init__(self):
         super().__init__()
@@ -213,7 +213,7 @@ class FloatingCatPet(QWidget):
             pass
 
     def prompt_agent_command(self):
-        command, ok = QInputDialog.getText(self, "Run Agent Command", self.AGENT_COMMAND_HINT)
+        command, ok = QInputDialog.getText(self, "Run Agent Command", self.AGENT_COMMAND_PROMPT)
         if ok and command.strip():
             self.run_agent_command(command.strip())
 
@@ -225,7 +225,7 @@ class FloatingCatPet(QWidget):
         lower_cmd = command.lower()
         try:
             if lower_cmd.startswith("obsidian"):
-                task = command[8:].strip()
+                task = command[len("obsidian"):].strip()
                 if task.startswith("daily"):
                     self.obsidian.get_today_note()
                     success = self.obsidian.create_daily_summary(self.llm)
@@ -237,7 +237,7 @@ class FloatingCatPet(QWidget):
                 return
 
             if lower_cmd.startswith("modify"):
-                task = command[6:].strip().lstrip(",")
+                task = command[len("modify"):].strip().lstrip(",")
                 if not task:
                     self.bubble_signal.emit("modify needs an instruction.")
                     return
@@ -246,7 +246,7 @@ class FloatingCatPet(QWidget):
 
             if lower_cmd.startswith("sandbox"):
                 from core.pi_agent import PiDevBridge
-                task_instruction = command[7:].strip().lstrip(",").strip()
+                task_instruction = command[len("sandbox"):].strip().lstrip(",").strip()
                 lower_instruction = task_instruction.lower()
                 bridge = PiDevBridge()
                 if lower_instruction == "accept":
@@ -263,7 +263,7 @@ class FloatingCatPet(QWidget):
                 return
 
             if lower_cmd.startswith("memory"):
-                memory_cmd = command[6:].strip().lower()
+                memory_cmd = command[len("memory"):].strip().lower()
                 if memory_cmd == "clear":
                     self.bubble_signal.emit(self.llm.memory_clear())
                 elif memory_cmd == "show":
