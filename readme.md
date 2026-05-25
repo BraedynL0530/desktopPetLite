@@ -7,6 +7,11 @@
 
 The project combines a persistent shell, optional LLM-powered editing flows, and a Raspberry Pi sandbox bridge for remote validation before local apply.
 
+
+#WARNING!!!
+currently this tui/gui does NOT have env safety as of now, i have fixed it modifying outside of scope but env is not safe do note it may accidently leak apikey untill next fix.
+this is gemni so likly safe and not maliuous but do know.
+
 ## Project Layout
 
 ```text
