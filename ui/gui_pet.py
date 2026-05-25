@@ -1,337 +1,1 @@
-import os
-import sys
-import random
-import threading
-from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, pyqtSignal
-from PyQt5.QtGui import QPainter, QPixmap
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox, QLineEdit, QPushButton, QHBoxLayout, QInputDialog
-
-# CRITICAL HIGH-DPI WORKSPACE ALIGNMENT FIX
-if sys.platform == 'win32':
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
-    os.environ["QT_SCREEN_SCALE_FACTORS"] = "1"
-    os.environ["QT_SCALE_FACTOR"] = "1"
-
-from core.config import LOCK_FILE
-from core.llm_client import LintLLMClient
-from core.obsidian_mcp import ObsidianMCP
-
-
-class FloatingCatPet(QWidget):
-    bubble_signal = pyqtSignal(str)
-    AGENT_COMMAND_PROMPT = "Enter command (obsidian daily, modify, sandbox, memory clear/show):"
-
-    def __init__(self):
-        super().__init__()
-        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.anim_dir = os.path.join(self.base_dir, "anim")
-        self.llm = LintLLMClient()
-        self.obsidian = ObsidianMCP()
-
-        self.animation_profiles = {
-            "default": {"file": "idle.png", "width": 32, "height": 32, "frames": 10},
-            "lie": {"file": "lie.png", "width": 32, "height": 32, "frames": 12},
-            "sleep": {"file": "sleep.png", "width": 32, "height": 32, "frames": 4},
-            "yawn": {"file": "yawn.png", "width": 32, "height": 32, "frames": 8},
-            "angry": {"file": "angry2.png", "width": 32, "height": 32, "frames": 9}
-        }
-        self.current_state = "default"
-        self.current_frame = 0
-        self.sprite_scale = 4
-        self.loaded_sprites = {}
-        self.load_assets()
-        self.init_ui()
-        self.bubble_signal.connect(self.bubble_label.setText)
-
-        self.frame_timer = QTimer()
-        self.frame_timer.timeout.connect(self.cycle_frame)
-        self.frame_timer.start(125)
-
-        self.lock_timer = QTimer()
-        self.lock_timer.timeout.connect(self.check_lock)
-        self.lock_timer.start(800)
-
-        self.chatter_timer = QTimer()
-        self.chatter_timer.timeout.connect(self.passive_chatter)
-        self.chatter_timer.start(45000)
-
-        self.drag_pos = QPoint()
-
-    def load_assets(self):
-        for s, info in self.animation_profiles.items():
-            path = os.path.join(self.anim_dir, info["file"])
-            if os.path.exists(path):
-                self.loaded_sprites[s] = {"pixmap": QPixmap(path), "w": info["width"], "h": info["height"],
-                                          "total": info["frames"], "fallback": False}
-            else:
-                self.loaded_sprites[s] = {"fallback": True}
-
-    def init_ui(self):
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-
-        # Main overall layout frame container
-        self.main_layout = QVBoxLayout()
-        self.main_layout.setContentsMargins(4, 4, 4, 4)
-        self.main_layout.setSpacing(4)
-
-        # ─── MIDDLE ROW: SPEECH BUBBLE OFFSET LEFT OF LINT ───
-        self.middle_row_layout = QHBoxLayout()
-        self.middle_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.middle_row_layout.setSpacing(4)
-
-        # Left-aligned speech bubble
-        self.bubble_label = QLabel("*staring*")
-        self.bubble_label.setStyleSheet(
-            "background-color: rgba(33, 37, 43, 235); color: #abb2bf; "
-            "border: 1px solid #5c6370; border-radius: 5px; padding: 4px; "
-            "font-family: monospace; font-size: 11px;"
-        )
-        self.bubble_label.setFixedWidth(136)
-        self.bubble_label.setFixedHeight(128)  # Matches cat height
-        self.bubble_label.setWordWrap(True)
-        self.bubble_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self.middle_row_layout.addWidget(self.bubble_label, 0, Qt.AlignLeft)
-
-        # Right-aligned anchor layout space strictly reserved for rendering the pixel cat
-        self.cat_canvas_space = QLabel()
-        self.cat_canvas_space.setFixedSize(128, 128)
-        self.middle_row_layout.addWidget(self.cat_canvas_space, 0, Qt.AlignRight)
-
-        self.main_layout.addLayout(self.middle_row_layout)
-
-        # ─── BOTTOM CONTROL INTERFACE LAYER: ZERO-PADDING COMPACT DECK ───
-        self.control_deck_layout = QVBoxLayout()
-        self.control_deck_layout.setContentsMargins(0, 0, 0, 0)  # STRIP AWAY PADDING
-        self.control_deck_layout.setSpacing(2)  # TIGHT STEP BETWEEN DECK COMPONENTS
-
-        # Model Selector Dropdown
-        self.model_selector = QComboBox()
-        self.model_selector.addItems(["llama-3.3-70b-versatile", "llama3-8b-8192", "gemini-2.0-flash"])
-        self.model_selector.setStyleSheet(
-            "background-color: #282c34; color: #61afef; border: 1px solid #4b5263; "
-            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 1px;"
-        )
-        self.model_selector.setFixedWidth(268)
-        self.model_selector.setFixedHeight(20)
-        self.control_deck_layout.addWidget(self.model_selector, 0, Qt.AlignCenter)
-
-        # Chat Row Deck input lane
-        self.input_row_layout = QHBoxLayout()
-        self.input_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.input_row_layout.setSpacing(2)
-
-        self.chat_input = QLineEdit()
-        self.chat_input.setPlaceholderText("type to lint...")
-        self.chat_input.setStyleSheet(
-            "background-color: #1e222b; color: #abb2bf; border: 1px solid #4b5263; "
-            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 2px;"
-        )
-        self.chat_input.setFixedHeight(20)
-        self.chat_input.setFixedWidth(244)
-        self.chat_input.returnPressed.connect(self.submit_desktop_chat)
-
-        self.send_btn = QPushButton("👋")
-        self.send_btn.setStyleSheet(
-            "background-color: #4b5263; color: white; border: none; "
-            "border-radius: 3px; font-size: 11px; font-weight: bold;"
-        )
-        self.send_btn.setFixedSize(22, 20)
-        self.send_btn.clicked.connect(self.submit_desktop_chat)
-
-        self.input_row_layout.addWidget(self.chat_input)
-        self.input_row_layout.addWidget(self.send_btn)
-        self.control_deck_layout.addLayout(self.input_row_layout)
-
-        self.agent_row_layout = QHBoxLayout()
-        self.agent_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.agent_row_layout.setSpacing(2)
-
-        self.agent_btn = QPushButton("agent")
-        self.agent_btn.setFixedHeight(20)
-        self.agent_btn.clicked.connect(self.prompt_agent_command)
-
-        self.daily_btn = QPushButton("daily")
-        self.daily_btn.setFixedHeight(20)
-        self.daily_btn.clicked.connect(lambda: self.run_agent_command("obsidian daily"))
-
-        self.memory_btn = QPushButton("mem clr")
-        self.memory_btn.setFixedHeight(20)
-        self.memory_btn.clicked.connect(lambda: self.run_agent_command("memory clear"))
-
-        for btn in [self.agent_btn, self.daily_btn, self.memory_btn]:
-            btn.setStyleSheet(
-                "background-color: #4b5263; color: white; border: none; "
-                "border-radius: 3px; font-size: 10px; font-family: monospace;"
-            )
-            self.agent_row_layout.addWidget(btn)
-
-        self.control_deck_layout.addLayout(self.agent_row_layout)
-
-        self.main_layout.addLayout(self.control_deck_layout)
-
-        # Text Fallback node
-        self.fallback_canvas = QLabel(" /\\_/\\\n( -.- )\n > ^ <")
-        self.fallback_canvas.setStyleSheet(
-            "color: #61afef; font-family: monospace; font-size: 14px; font-weight: bold; padding-left: 15px;")
-        self.main_layout.addWidget(self.fallback_canvas)
-        self.fallback_canvas.hide()
-
-        self.setLayout(self.main_layout)
-
-        # Increase window height to fit the additional agent action button row.
-        self.setFixedSize(276, 202)
-        self.move(QApplication.primaryScreen().geometry().width() - 310, 60)
-
-    def submit_desktop_chat(self):
-        user_text = self.chat_input.text().strip()
-        if not user_text: return
-
-        self.chat_input.clear()
-        self.bubble_signal.emit("*thinking...*")
-        chosen_model = self.model_selector.currentText()
-        threading.Thread(target=self._async_desktop_query, args=(user_text, chosen_model), daemon=True).start()
-
-    def _async_desktop_query(self, query, model):
-        try:
-            reply = self.llm.ask_cat(query, model_override=model,temp=0.35)
-            if reply: self.bubble_signal.emit(reply)
-        except Exception:
-            self.bubble_signal.emit("connection error.")
-
-    def passive_chatter(self):
-        if not self.isVisible(): return
-        chosen_model = self.model_selector.currentText()
-        threading.Thread(target=self._async_talk, args=(chosen_model,), daemon=True).start()
-
-    def _async_talk(self, model):
-        try:
-            txt = self.llm.ask_cat("make a short single sentence witty comment about a coder typing.",
-                                   model_override=model,temp=0.55)
-            if txt and not txt.startswith("*"): self.bubble_signal.emit(txt)
-        except:
-            pass
-
-    def prompt_agent_command(self):
-        command, ok = QInputDialog.getText(self, "Run Agent Command", self.AGENT_COMMAND_PROMPT)
-        if ok and command.strip():
-            self.run_agent_command(command.strip())
-
-    def run_agent_command(self, command: str):
-        self.bubble_signal.emit("*running agent command...*")
-        threading.Thread(target=self._execute_agent_command, args=(command,), daemon=True).start()
-
-    def _execute_agent_command(self, command: str):
-        lower_cmd = command.lower()
-        try:
-            if lower_cmd.startswith("obsidian"):
-                task = command[len("obsidian"):].strip()
-                if task.startswith("daily"):
-                    self.obsidian.get_today_note()
-                    success = self.obsidian.create_daily_summary(self.llm)
-                    msg = "*purrs* daily log note pushed into vault." if success else "failed note compile."
-                    self.llm.memory.add_entry("obsidian", "obsidian daily", msg)
-                    self.bubble_signal.emit(msg)
-                    return
-                self.bubble_signal.emit("unknown obsidian command.")
-                return
-
-            if lower_cmd.startswith("modify"):
-                task = command[len("modify"):].strip().lstrip(",")
-                if not task:
-                    self.bubble_signal.emit("modify needs an instruction.")
-                    return
-                self.bubble_signal.emit(self.llm.run_multi_file_agent(task))
-                return
-
-            if lower_cmd.startswith("sandbox"):
-                from core.pi_agent import PiDevBridge
-                task_instruction = command[len("sandbox"):].strip().lstrip(",").strip()
-                lower_instruction = task_instruction.lower()
-                bridge = PiDevBridge()
-                if lower_instruction == "accept":
-                    self.bubble_signal.emit(bridge.pull_remote_mutations())
-                    return
-                if lower_instruction.startswith("clear"):
-                    confirm_phrase = task_instruction[len("clear"):].strip()
-                    self.bubble_signal.emit(bridge.clear_remote_sandbox(confirm_phrase))
-                    return
-                if not task_instruction:
-                    self.bubble_signal.emit("type what you want me to build and test inside the sandbox, dummy.")
-                    return
-                self.bubble_signal.emit(bridge.run_agentic_sandbox(task_instruction, run_cmd="python3 launcher.py --help"))
-                return
-
-            if lower_cmd.startswith("memory"):
-                memory_cmd = command[len("memory"):].strip().lower()
-                if memory_cmd == "clear":
-                    self.bubble_signal.emit(self.llm.memory_clear())
-                elif memory_cmd == "show":
-                    self.bubble_signal.emit(self.llm.memory_show())
-                else:
-                    self.bubble_signal.emit("memory commands: memory show | memory clear")
-                return
-
-            self.bubble_signal.emit("unknown agent command.")
-        except Exception as e:
-            self.bubble_signal.emit(f"agent command failed: {str(e)[:80]}")
-
-    def cycle_frame(self):
-        d = self.loaded_sprites.get(self.current_state)
-        if not d or d["fallback"]:
-            self.fallback_canvas.show()
-            return
-        self.fallback_canvas.hide()
-        self.current_frame = (self.current_frame + 1) % d["total"]
-        if self.current_frame == 0 and self.current_state != "default":
-            if random.random() < 0.4: self.current_state = "default"
-        self.update()
-
-    def paintEvent(self, event):
-        d = self.loaded_sprites.get(self.current_state)
-        if not d or d["fallback"]: return
-
-        p = QPainter(self)
-        src_rect = QRect(self.current_frame * d["w"], 0, d["w"], d["h"])
-
-        space_geometry = self.cat_canvas_space.geometry()
-        dest_w = d["w"] * self.sprite_scale
-        dest_h = d["h"] * self.sprite_scale
-
-        dest_x = space_geometry.x() + (space_geometry.width() - dest_w) // 2
-        dest_y = space_geometry.y() + (space_geometry.height() - dest_h) // 2
-        dest_rect = QRect(dest_x, dest_y, dest_w, dest_h)
-
-        p.drawPixmap(dest_rect, d["pixmap"], src_rect)
-
-    def check_lock(self):
-        self.hide() if os.path.exists(LOCK_FILE) else self.show()
-
-    def mousePressEvent(self, event):
-        # Dragging lock limits restricted exclusively to the active middle row canvas element zone
-        if event.y() > 132:
-            event.ignore()
-            return
-        if event.button() == Qt.LeftButton:
-            self.drag_pos = event.globalPos() - self.frameGeometry().topLeft()
-            states = [s for s, data in self.loaded_sprites.items() if not data.get("fallback", True)]
-            if states:
-                self.current_state = random.choice(states)
-                self.current_frame = 0
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if not self.drag_pos.isNull() and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self.drag_pos)
-            event.accept()
-
-
-def run_gui():
-    app = QApplication(sys.argv)
-    pet = FloatingCatPet()
-    pet.show()
-    sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    run_gui()
+import osimport sysimport randomimport threadingfrom PyQt5.QtCore import Qt, QTimer, QPoint, QRect, pyqtSignalfrom PyQt5.QtGui import QPainter, QPixmapfrom PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QComboBox, QLineEdit, QPushButton, QHBoxLayout, QInputDialog# CRITICAL HIGH-DPI WORKSPACE ALIGNMENT FIXif sys.platform == 'win32':    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"    os.environ["QT_SCREEN_SCALE_FACTORS"] = "1"    os.environ["QT_SCALE_FACTOR"] = "1"from core.config import LOCK_FILEfrom core.llm_client import LintLLMClientfrom core.obsidian_mcp import ObsidianMCPclass FloatingCatPet(QWidget):    bubble_signal = pyqtSignal(str)    AGENT_COMMAND_PROMPT = "Enter command (obsidian daily, modify, sandbox, memory clear/show):"    def __init__(self):        super().__init__()        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))        self.anim_dir = os.path.join(self.base_dir, "anim")        self.llm = LintLLMClient()        self.obsidian = ObsidianMCP()        self.animation_profiles = {            "default": {"file": "idle.png", "width": 32, "height": 32, "frames": 10},            "lie": {"file": "lie.png", "width": 32, "height": 32, "frames": 12},            "sleep": {"file": "sleep.png", "width": 32, "height": 32, "frames": 4},            "yawn": {"file": "yawn.png", "width": 32, "height": 32, "frames": 8},            "angry": {"file": "angry2.png", "width": 32, "height": 32, "frames": 9}        }        self.current_state = "default"        self.current_frame = 0        self.sprite_scale = 4        self.loaded_sprites = {}        self.load_assets()        self.init_ui()        self.bubble_signal.connect(self.bubble_label.setText)        self.frame_timer = QTimer()        self.frame_timer.timeout.connect(self.cycle_frame)        self.frame_timer.start(125)        self.lock_timer = QTimer()        self.lock_timer.timeout.connect(self.check_lock)        self.lock_timer.start(800)        self.chatter_timer = QTimer()        self.chatter_timer.timeout.connect(self.passive_chatter)        self.chatter_timer.start(45000)        self.drag_pos = QPoint()    def load_assets(self):        for s, info in self.animation_profiles.items():            path = os.path.join(self.anim_dir, info["file"])            if os.path.exists(path):                self.loaded_sprites[s] = {"pixmap": QPixmap(path), "w": info["width"], "h": info["height"],                                          "total": info["frames"], "fallback": False}            else:                self.loaded_sprites[s] = {"fallback": True}    def init_ui(self):        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)        self.setAttribute(Qt.WA_TranslucentBackground, True)        # Main overall layout frame container        self.main_layout = QVBoxLayout()        self.main_layout.setContentsMargins(4, 4, 4, 4)        self.main_layout.setSpacing(4)        # ─── MIDDLE ROW: SPEECH BUBBLE OFFSET LEFT OF LINT ───        self.middle_row_layout = QHBoxLayout()        self.middle_row_layout.setContentsMargins(0, 0, 0, 0)        self.middle_row_layout.setSpacing(4)        # Left-aligned speech bubble        self.bubble_label = QLabel("*staring*")        self.bubble_label.setStyleSheet(            "background-color: rgba(33, 37, 43, 235); color: #abb2bf; "            "border: 1px solid #5c6370; border-radius: 5px; padding: 4px; "            "font-family: monospace; font-size: 11px;"        )        self.bubble_label.setFixedWidth(136)        self.bubble_label.setFixedHeight(128)  # Matches cat height        self.bubble_label.setWordWrap(True)        self.bubble_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)        self.middle_row_layout.addWidget(self.bubble_label, 0, Qt.AlignLeft)        # Right-aligned anchor layout space strictly reserved for rendering the pixel cat        self.cat_canvas_space = QLabel()        self.cat_canvas_space.setFixedSize(128, 128)        self.middle_row_layout.addWidget(self.cat_canvas_space, 0, Qt.AlignRight)        self.main_layout.addLayout(self.middle_row_layout)        # ─── BOTTOM CONTROL INTERFACE LAYER: ZERO-PADDING COMPACT DECK ───        self.control_deck_layout = QVBoxLayout()        self.control_deck_layout.setContentsMargins(0, 0, 0, 0)  # STRIP AWAY PADDING        self.control_deck_layout.setSpacing(2)  # TIGHT STEP BETWEEN DECK COMPONENTS        # Model Selector Dropdown        self.model_selector = QComboBox()        self.model_selector.addItems(["llama-3.3-70b-versatile", "llama3-8b-8192", "gemini-2.0-flash"])        self.model_selector.setStyleSheet(            "background-color: #282c34; color: #61afef; border: 1px solid #4b5263; "            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 1px;"        )        self.model_selector.setFixedWidth(268)        self.model_selector.setFixedHeight(20)        self.control_deck_layout.addWidget(self.model_selector, 0, Qt.AlignCenter)        # Chat Row Deck input lane        self.input_row_layout = QHBoxLayout()        self.input_row_layout.setContentsMargins(0, 0, 0, 0)        self.input_row_layout.setSpacing(2)        self.chat_input = QLineEdit()        self.chat_input.setPlaceholderText("type to lint...")        self.chat_input.setStyleSheet(            "background-color: #1e222b; color: #abb2bf; border: 1px solid #4b5263; "            "border-radius: 3px; font-family: monospace; font-size: 10px; padding: 2px;"        )        self.chat_input.setFixedHeight(20)        self.chat_input.setFixedWidth(244)        self.chat_input.returnPressed.connect(self.submit_desktop_chat)        self.send_btn = QPushButton("👋")        self.send_btn.setStyleSheet(            "background-color: #4b5263; color: white; border: none; "            "border-radius: 3px; font-size: 11px; font-weight: bold;"        )        self.send_btn.setFixedSize(22, 20)        self.send_btn.clicked.connect(self.submit_desktop_chat)        self.input_row_layout.addWidget(self.chat_input)        self.input_row_layout.addWidget(self.send_btn)        self.control_deck_layout.addLayout(self.input_row_layout)        self.agent_row_layout = QHBoxLayout()        self.agent_row_layout.setContentsMargins(0, 0, 0, 0)        self.agent_row_layout.setSpacing(2)        self.agent_btn = QPushButton("agent")        self.agent_btn.setFixedHeight(20)        self.agent_btn.clicked.connect(self.prompt_agent_command)        self.daily_btn = QPushButton("daily")        self.daily_btn.setFixedHeight(20)        self.daily_btn.clicked.connect(lambda: self.run_agent_command("obsidian daily"))        self.memory_btn = QPushButton("mem clr")        self.memory_btn.setFixedHeight(20)        self.memory_btn.clicked.connect(lambda: self.run_agent_command("memory clear"))        for btn in [self.agent_btn, self.daily_btn, self.memory_btn]:            btn.setStyleSheet(                "background-color: #4b5263; color: white; border: none; "                "border-radius: 3px; font-size: 10px; font-family: monospace;"            )            self.agent_row_layout.addWidget(btn)        self.control_deck_layout.addLayout(self.agent_row_layout)        self.main_layout.addLayout(self.control_deck_layout)        # Text Fallback node        self.fallback_canvas = QLabel(" /\\_/\\\n( -.- )\n > ^ <")        self.fallback_canvas.setStyleSheet(            "color: #61afef; font-family: monospace; font-size: 14px; font-weight: bold; padding-left: 15px;")        self.main_layout.addWidget(self.fallback_canvas)        self.fallback_canvas.hide()        self.setLayout(self.main_layout)        # Increase window height to fit the additional agent action button row.        self.setFixedSize(276, 202)        self.move(QApplication.primaryScreen().geometry().width() - 310, 60)    def submit_desktop_chat(self):        user_text = self.chat_input.text().strip()        if not user_text: return        self.chat_input.clear()        self.bubble_signal.emit("*thinking...*")        chosen_model = self.model_selector.currentText()        threading.Thread(target=self._async_desktop_query, args=(user_text, chosen_model), daemon=True).start()    def _async_desktop_query(self, query, model):        try:            reply = self.llm.ask_cat(query, model_override=model,temp=0.35)            if reply: self.bubble_signal.emit(reply)        except Exception:            self.bubble_signal.emit("connection error.")    def passive_chatter(self):        if not self.isVisible(): return        chosen_model = self.model_selector.currentText()        threading.Thread(target=self._async_talk, args=(chosen_model,), daemon=True).start()    def _async_talk(self, model):        try:            txt = self.llm.ask_cat("make a short single sentence witty comment about a coder typing.",                                   model_override=model,temp=0.55)            if txt and not txt.startswith("*"): self.bubble_signal.emit(txt)        except:            pass    def prompt_agent_command(self):        command, ok = QInputDialog.getText(self, "Run Agent Command", self.AGENT_COMMAND_PROMPT)        if ok and command.strip():            self.run_agent_command(command.strip())    def run_agent_command(self, command: str):        self.bubble_signal.emit("*running agent command...*")        threading.Thread(target=self._execute_agent_command, args=(command,), daemon=True).start()    def _execute_agent_command(self, command: str):        lower_cmd = command.lower()        try:            if lower_cmd.startswith("obsidian"):                task = command[len("obsidian"):].strip()                if task.startswith("daily"):                    self.obsidian.get_today_note()                    success = self.obsidian.create_daily_summary(self.llm)                    msg = "*purrs* daily log note pushed into vault." if success else "failed note compile."                    self.llm.memory.add_entry("obsidian", "obsidian daily", msg)                    self.bubble_signal.emit(msg)                    return                self.bubble_signal.emit("unknown obsidian command.")                return            if lower_cmd.startswith("modify"):                task = command[len("modify"):].strip().lstrip(",")                if not task:                    self.bubble_signal.emit("modify needs an instruction.")                    return                self.bubble_signal.emit(self.llm.run_multi_file_agent(task))                return            if lower_cmd.startswith("sandbox"):                from core.pi_agent import PiDevBridge                task_instruction = command[len("sandbox"):].strip().lstrip(",").strip()                lower_instruction = task_instruction.lower()                bridge = PiDevBridge()                if lower_instruction == "accept":                    self.bubble_signal.emit(bridge.pull_remote_mutations())                    return                if lower_instruction.startswith("clear"):                    confirm_phrase = task_instruction[len("clear"):].strip()                    self.bubble_signal.emit(bridge.clear_remote_sandbox(confirm_phrase))                    return                if not task_instruction:                    self.bubble_signal.emit("type what you want me to build and test inside the sandbox, dummy.")                    return                self.bubble_signal.emit(bridge.run_agentic_sandbox(task_instruction, run_cmd="python3 launcher.py --help"))                return            if lower_cmd.startswith("memory"):                memory_cmd = command[len("memory"):].strip().lower()                if memory_cmd == "clear":                    self.bubble_signal.emit(self.llm.memory_clear())                elif memory_cmd == "show":                    self.bubble_signal.emit(self.llm.memory_show())                else:                    self.bubble_signal.emit("memory commands: memory show | memory clear")                return            self.bubble_signal.emit("unknown agent command.")        except Exception as e:            self.bubble_signal.emit(f"agent command failed: {str(e)[:80]}")    def cycle_frame(self):        d = self.loaded_sprites.get(self.current_state)        if not d or d["fallback"]:            self.fallback_canvas.show()            return        self.fallback_canvas.hide()        self.current_frame = (self.current_frame + 1) % d["total"]        if self.current_frame == 0 and self.current_state != "default":            if random.random() < 0.4: self.current_state = "default"        self.update()    def paintEvent(self, event):        d = self.loaded_sprites.get(self.current_state)        if not d or d["fallback"]: return        p = QPainter(self)        src_rect = QRect(self.current_frame * d["w"], 0, d["w"], d["h"])        space_geometry = self.cat_canvas_space.geometry()        dest_w = d["w"] * self.sprite_scale        dest_h = d["h"] * self.sprite_scale        dest_x = space_geometry.x() + (space_geometry.width() - dest_w) // 2        dest_y = space_geometry.y() + (space_geometry.height() - dest_h) // 2        dest_rect = QRect(dest_x, dest_y, dest_w, dest_h)        p.drawPixmap(dest_rect, d["pixmap"], src_rect)    def check_lock(self):        self.hide() if os.path.exists(LOCK_FILE) else self.show()    def mousePressEvent(self, event):        # Limit dragging to the top half (cat and bubble area)        if event.button() == Qt.LeftButton and event.y() <= 132:            # 1. Trigger the animation state change            states = [s for s, data in self.loaded_sprites.items() if not data.get("fallback", True)]            if states:                self.current_state = random.choice(states)                self.current_frame = 0            # 2. Hand the window drag directly to the Operating System            if self.windowHandle():                self.windowHandle().startSystemMove()            event.accept()        else:            # 3. CRITICAL: Pass clicks on the bottom half down to the buttons/inputs            super().mousePressEvent(event)    def mouseMoveEvent(self, event):        # Only execute the move if we have a valid drag origin        if not self.drag_pos.isNull() and event.buttons() == Qt.LeftButton:            self.move(event.globalPos() - self.drag_pos)            event.accept()        else:            # Keep event loop propagating for child widgets            super().mouseMoveEvent(event)    def mouseReleaseEvent(self, event):        # CRITICAL: Reset the drag position when the mouse is released to prevent UI freezing        if event.button() == Qt.LeftButton:            self.drag_pos = QPoint()            event.accept()        # Ensure normal release behaviors trigger for UI elements        super().mouseReleaseEvent(event)def run_gui():    app = QApplication(sys.argv)    pet = FloatingCatPet()    pet.show()    sys.exit(app.exec_())if __name__ == "__main__":    run_gui()
